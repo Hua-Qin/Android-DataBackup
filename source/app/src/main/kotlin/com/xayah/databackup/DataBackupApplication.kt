@@ -5,6 +5,7 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import dagger.hilt.android.HiltAndroidApp
 import org.bouncycastle.jce.provider.BouncyCastleProvider
+import rikka.shizuku.Shizuku
 import java.security.Security
 import javax.inject.Inject
 
@@ -14,10 +15,23 @@ class DataBackupApplication : Application(), Configuration.Provider {
         lateinit var application: Application
     }
 
+    private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        // Shizuku permission result handled by AdbService
+    }
+
     override fun onCreate() {
         super.onCreate()
         application = this
         setupBouncyCastle()
+        setupShizuku()
+    }
+
+    private fun setupShizuku() {
+        try {
+            Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
+        } catch (e: Exception) {
+            // Shizuku not available, skip
+        }
     }
 
     // Ref: https://github.com/hyperledger/web3j/issues/915#issuecomment-483145928

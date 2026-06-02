@@ -170,3 +170,10 @@ enum class ProcessingInfoType {
     SAVE_ICONS,
     SET_UP_INST_ENV,
 }
+
+enum class PermissionMode {
+    ROOT,
+    ADB;
+
+    companion object
+}

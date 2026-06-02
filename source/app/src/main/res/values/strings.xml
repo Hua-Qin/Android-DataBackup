@@ -225,6 +225,8 @@
     <string name="required">Required</string>
     <string name="root_permission">Root permission</string>
     <string name="root_permission_desc">Backup and restore app data</string>
+    <string name="adb_permission">ADB permission</string>
+    <string name="adb_permission_desc">Backup and restore APKs only (requires Shizuku)</string>
     <string name="abi_validation_desc">Validate if your device is supported</string>
     <string name="optional">Optional</string>
     <string name="notification_permission">Notification permission</string>

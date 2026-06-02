@@ -49,6 +49,7 @@ guava-compat = "9999.0-empty-to-avoid-conflict-with-guava"
 sardine-next = "1.0.2"
 bountycastle = "1.79"
 animation-graphics = "1.7.6"
+shizuku = "13.1.5"
 
 # plugins
 android-gradle-plugin = "8.11.1"
@@ -118,6 +119,8 @@ smbj-rpc = { module = "com.rapid7.client:dcerpc", version.ref = "smbj-rpc" }
 sshj = { module = "com.hierynomus:sshj", version.ref = "sshj" }
 guava-compat = { module = "com.google.guava:listenablefuture", version.ref = "guava-compat" }
 sardine-next = { module = "com.github.xayahsususu:sardine-next", version.ref = "sardine-next" }
+shizuku-api = { module = "dev.rikka.shizuku:api", version.ref = "shizuku" }
+shizuku-provider = { module = "dev.rikka.shizuku:provider", version.ref = "shizuku" }
 
 # Dependencies of the included build-logic
 android-build-logic = { group = "com.android.tools.build", name = "gradle", version.ref = "android-gradle-plugin" }

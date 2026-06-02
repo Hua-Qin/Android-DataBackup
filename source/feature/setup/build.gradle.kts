@@ -29,6 +29,10 @@ dependencies {
     // libsu
     implementation(libs.libsu.core)
 
+    // Shizuku
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
+
     // PickYou
     implementation(libs.pickyou)
 }

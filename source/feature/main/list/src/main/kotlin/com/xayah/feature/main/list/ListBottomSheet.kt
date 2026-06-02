@@ -32,9 +32,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xayah.core.data.repository.Filters
+import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.datastore.saveLoadSystemApps
 import com.xayah.core.hiddenapi.castTo
 import com.xayah.core.model.OpType
+import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.SortType
 import com.xayah.core.model.database.CloudEntity
 import com.xayah.core.model.database.LabelEntity
@@ -104,6 +106,8 @@ internal fun ListBottomSheet(
             )
 
             val dataItemsSheetState = rememberModalBottomSheetState()
+            val context = LocalContext.current
+            val permissionMode by context.readPermissionMode().collectAsStateWithLifecycle(PermissionMode.ROOT)
             AppsDataItemsSheet(
                 isShow = uiState.showDataItemsSheet,
                 sheetState = dataItemsSheetState,
@@ -116,7 +120,8 @@ internal fun ListBottomSheet(
                 },
                 onSetDataItems = {
                     viewModel.setDataItems(it)
-                }
+                },
+                permissionMode = permissionMode
             )
         }
 
@@ -331,13 +336,14 @@ internal fun AppsDataItemsSheet(
     sheetState: SheetState,
     onDismissRequest: () -> Unit,
     onSetDataItems: (PackageDataStates) -> Unit,
+    permissionMode: PermissionMode = PermissionMode.ROOT,
 ) {
     if (isShow) {
         ModalBottomSheet(onDismissRequest = onDismissRequest, sheetState = sheetState) {
             Title(text = stringResource(id = R.string.data_items))
 
             var selections by remember { mutableStateOf(PackageDataStates()) }
-            DataChips(selections) { type, selected ->
+            DataChips(selections, permissionMode = permissionMode) { type, selected ->
                 selections = type.setSelected(selections, selected.not())
             }
 

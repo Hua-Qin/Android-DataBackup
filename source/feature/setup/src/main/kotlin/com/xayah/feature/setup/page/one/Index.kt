@@ -49,6 +49,7 @@ fun PageOne() {
     val viewModel = hiltViewModel<IndexViewModel>()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val rootState by viewModel.rootState.collectAsStateWithLifecycle()
+    val adbState by viewModel.adbState.collectAsStateWithLifecycle()
     val abiState by viewModel.abiState.collectAsStateWithLifecycle()
     val notificationState by viewModel.notificationState.collectAsStateWithLifecycle()
     val allRequiredValidated by viewModel.allRequiredValidated.collectAsStateWithLifecycle()
@@ -66,6 +67,7 @@ fun PageOne() {
                     onClick = {
                         viewModel.launchOnIO {
                             viewModel.emitIntent(IndexUiIntent.ValidateRoot)
+                            viewModel.emitIntent(IndexUiIntent.ValidateAdb)
                             viewModel.emitIntent(IndexUiIntent.ValidateAbi)
                             viewModel.emitIntent(IndexUiIntent.ValidateNotification(context = context))
                         }
@@ -117,6 +119,15 @@ fun PageOne() {
                 ) {
                     viewModel.launchOnIO {
                         viewModel.emitIntent(IndexUiIntent.ValidateRoot)
+                    }
+                }
+                PermissionButton(
+                    title = stringResource(id = R.string.adb_permission),
+                    desc = stringResource(id = R.string.adb_permission_desc),
+                    envState = adbState,
+                ) {
+                    viewModel.launchOnIO {
+                        viewModel.emitIntent(IndexUiIntent.ValidateAdb)
                     }
                 }
                 PermissionButton(

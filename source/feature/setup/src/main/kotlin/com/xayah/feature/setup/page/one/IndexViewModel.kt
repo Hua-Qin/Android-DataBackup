@@ -6,11 +6,14 @@ import android.os.Build
 import androidx.compose.material3.ExperimentalMaterial3Api
 import com.topjohnwu.superuser.Shell
 import com.xayah.core.common.util.BuildConfigUtil
+import com.xayah.core.datastore.savePermissionMode
+import com.xayah.core.model.PermissionMode
 import com.xayah.core.ui.viewmodel.BaseViewModel
 import com.xayah.core.ui.viewmodel.IndexUiEffect
 import com.xayah.core.ui.viewmodel.UiIntent
 import com.xayah.core.ui.viewmodel.UiState
 import com.xayah.core.util.NotificationUtil
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.withLog
 import com.xayah.feature.setup.EnvState
@@ -32,6 +35,7 @@ data class IndexUiState(
 sealed class IndexUiIntent : UiIntent {
     data object ValidateRoot : IndexUiIntent()
     data object ValidateAbi : IndexUiIntent()
+    data object ValidateAdb : IndexUiIntent()
     data object OnResume : IndexUiIntent()
     data class ValidateNotification(val context: Context) : IndexUiIntent()
 }
@@ -65,7 +69,22 @@ class IndexViewModel @Inject constructor(
                             // Kill daemon
                             BaseUtil.kill(context, "${context.packageName}:root:daemon")
                         }.withLog()
-                        _rootState.value = if (runCatching { Shell.getShell().isRoot }.getOrElse { false }) EnvState.Succeed else EnvState.Failed
+                        _rootState.value = if (runCatching { Shell.getShell().isRoot }.getOrElse { false }) {
+                            context.savePermissionMode(PermissionMode.ROOT)
+                            EnvState.Succeed
+                        } else EnvState.Failed
+                    }
+                }
+            }
+
+            is IndexUiIntent.ValidateAdb -> {
+                mutex.withLock {
+                    if (adbState.value == EnvState.Idle || adbState.value == EnvState.Failed) {
+                        _adbState.value = EnvState.Processing
+                        _adbState.value = if (AdbService.isAvailable()) {
+                            context.savePermissionMode(PermissionMode.ADB)
+                            EnvState.Succeed
+                        } else EnvState.Failed
                     }
                 }
             }
@@ -113,11 +132,17 @@ class IndexViewModel @Inject constructor(
 
     private val _rootState: MutableStateFlow<EnvState> = MutableStateFlow(EnvState.Idle)
     val rootState: StateFlow<EnvState> = _rootState.stateInScope(EnvState.Idle)
+    private val _adbState: MutableStateFlow<EnvState> = MutableStateFlow(EnvState.Idle)
+    val adbState: StateFlow<EnvState> = _adbState.stateInScope(EnvState.Idle)
     private val _abiState: MutableStateFlow<EnvState> = MutableStateFlow(EnvState.Idle)
     val abiState: StateFlow<EnvState> = _abiState.stateInScope(EnvState.Idle)
     private val _notificationState: MutableStateFlow<EnvState> = MutableStateFlow(EnvState.Idle)
     val notificationState: StateFlow<EnvState> = _notificationState.stateInScope(EnvState.Idle)
 
-    val allRequiredValidated: StateFlow<Boolean> = combine(_rootState, _abiState) { root, abi -> root == EnvState.Succeed && abi == EnvState.Succeed }.flowOnIO().stateInScope(false)
+    // Root 或 ADB 至少通过一个 + ABI 通过即可继续
+    val allRequiredValidated: StateFlow<Boolean> = combine(_rootState, _adbState, _abiState) { root, adb, abi ->
+        (root == EnvState.Succeed || adb == EnvState.Succeed) && abi == EnvState.Succeed
+    }.flowOnIO().stateInScope(false)
+
     val allOptionalValidated: StateFlow<Boolean> = _notificationState.map { notification -> notification == EnvState.Succeed }.flowOnIO().stateInScope(false)
 }
