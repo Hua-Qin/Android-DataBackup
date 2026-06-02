@@ -51,40 +51,30 @@ jobs:
       - name: Check build-logic
         run: ./gradlew check -p build-logic
 
-      - name: Decode store file
-        env:
-            STORE_FILE: ${{ secrets.STORE_FILE }}
-            ENCODED_STRING: ${{ secrets.STORE_BASE64 }}
-        run: echo $ENCODED_STRING | base64 -di > "./app/${STORE_FILE}"
-
-      - name: Build with gradle
+      - name: Build Debug APKs
         id: gradle
         env:
-          STORE_FILE: ${{ secrets.STORE_FILE }}
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           BUILD_ALPHA: ${{ github.event.inputs.Alpha }}
           BUILD_PREMIUM: ${{ github.event.inputs.Premium }}
           BUILD_FOSS: ${{ github.event.inputs.Foss }}
         run: |
           TASKS=""
           if [ ${BUILD_ALPHA} = 'true' ]; then
-            TASKS="$TASKS assembleArm64-v8aAlphaRelease assembleArmeabi-v7aAlphaRelease assembleX86AlphaRelease assembleX86_64AlphaRelease"
+            TASKS="$TASKS assembleArm64-v8aAlphaDebug assembleArmeabi-v7aAlphaDebug assembleX86AlphaDebug assembleX86_64AlphaDebug"
           fi
           if [ ${BUILD_PREMIUM} = 'true' ]; then
-            TASKS="$TASKS assembleArm64-v8aPremiumRelease assembleArmeabi-v7aPremiumRelease assembleX86PremiumRelease assembleX86_64PremiumRelease"
+            TASKS="$TASKS assembleArm64-v8aPremiumDebug assembleArmeabi-v7aPremiumDebug assembleX86PremiumDebug assembleX86_64PremiumDebug"
           fi
           if [ ${BUILD_FOSS} = 'true' ]; then
-            TASKS="$TASKS assembleArm64-v8aFossRelease assembleArmeabi-v7aFossRelease assembleX86FossRelease assembleX86_64FossRelease"
+            TASKS="$TASKS assembleArm64-v8aFossDebug assembleArmeabi-v7aFossDebug assembleX86FossDebug assembleX86_64FossDebug"
           fi
           if [ -z ${TASKS} ]; then
-            TASKS="assembleRelease"
+            TASKS="assembleDebug"
           fi
           ./gradlew $TASKS --daemon --parallel
 
       - name: Move APKs
-        run: mv ./*/build/outputs/apk/*/release/*.apk .
+        run: find . -path "*/build/outputs/apk/*/debug/*.apk" -exec mv {} . \;
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
