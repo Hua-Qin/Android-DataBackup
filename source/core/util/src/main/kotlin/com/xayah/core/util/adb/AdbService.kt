@@ -1,7 +1,10 @@
 package com.xayah.core.util.adb
 
-import android.content.Context
+import android.content.pm.PackageManager
+import android.os.ParcelFileDescriptor
 import rikka.shizuku.Shizuku
+import moe.shizuku.server.IRemoteProcess
+import moe.shizuku.server.IShizukuService
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
@@ -11,12 +14,18 @@ import java.io.InputStreamReader
  */
 object AdbService {
 
+    private fun getService(): IShizukuService {
+        val binder = Shizuku.getBinder()
+            ?: throw IllegalStateException("Shizuku binder not available")
+        return IShizukuService.Stub.asInterface(binder)
+    }
+
     /**
      * 检查 Shizuku 是否已激活且可用
      */
     fun isAvailable(): Boolean {
         return try {
-            Shizuku.getUid() != -1 && Shizuku.checkSelfPermission() == Shizuku.PERMISSION_GRANTED
+            Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
         } catch (e: Exception) {
             false
         }
@@ -25,9 +34,9 @@ object AdbService {
     /**
      * 请求 Shizuku 权限
      */
-    fun requestPermission(context: Context) {
+    fun requestPermission(context: android.content.Context) {
         try {
-            if (Shizuku.checkSelfPermission() != Shizuku.PERMISSION_GRANTED) {
+            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
                 Shizuku.requestPermission(0)
             }
         } catch (e: Exception) {
@@ -42,14 +51,16 @@ object AdbService {
      */
     fun execute(vararg command: String): AdbResult {
         return try {
-            val process = Shizuku.newProcess(command, null, null)
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val errorReader = BufferedReader(InputStreamReader(process.errorStream))
+            val remoteProcess: IRemoteProcess = getService().newProcess(command, null, null)
+            val inputStream = ParcelFileDescriptor.AutoCloseInputStream(remoteProcess.inputStream)
+            val errorStream = ParcelFileDescriptor.AutoCloseInputStream(remoteProcess.errorStream)
+            val reader = BufferedReader(InputStreamReader(inputStream))
+            val errorReader = BufferedReader(InputStreamReader(errorStream))
             val output = reader.readLines()
             val error = errorReader.readLines()
             reader.close()
             errorReader.close()
-            val exitCode = process.waitFor()
+            val exitCode = remoteProcess.waitFor()
             AdbResult(
                 isSuccess = exitCode == 0,
                 out = output,
