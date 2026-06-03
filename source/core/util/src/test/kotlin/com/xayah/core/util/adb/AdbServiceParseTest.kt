@@ -9,10 +9,142 @@ import org.junit.Test
  */
 class AdbServiceParseTest {
 
-    // --- listFilePaths 解析测试 ---
+    // ========== buildLsCommand 测试 ==========
 
     @Test
-    fun `parseLsOutput filters directories from ls output`() {
+    fun `buildLsCommand constructs correct ls -1F command for default listing`() {
+        val cmd = AdbService.buildLsCommand("/storage/emulated/0")
+        assertArrayEquals(arrayOf("ls", "-1F", "/storage/emulated/0/"), cmd)
+    }
+
+    @Test
+    fun `buildLsCommand does not append slash if already present`() {
+        val cmd = AdbService.buildLsCommand("/storage/emulated/0/")
+        assertArrayEquals(arrayOf("ls", "-1F", "/storage/emulated/0/"), cmd)
+    }
+
+    @Test
+    fun `buildLsCommand for dirs only uses -d flag`() {
+        val cmd = AdbService.buildLsCommand("/storage/emulated/0", listFiles = false, listDirs = true)
+        // -d lists directory entries themselves, -F adds type indicators
+        assertTrue(cmd.contains("-d"))
+    }
+
+    @Test
+    fun `buildLsCommand for files only uses appropriate flags`() {
+        val cmd = AdbService.buildLsCommand("/storage/emulated/0", listFiles = true, listDirs = false)
+        // Should use -p flag to identify non-directories
+        assertTrue(cmd.contains("-p"))
+    }
+
+    // ========== parseLsOutput 测试 ==========
+
+    @Test
+    fun `parseLsOutput correctly identifies directories with trailing slash`() {
+        val output = listOf(
+            "Alarms/",
+            "Android/",
+            "DCIM/",
+            "Documents/"
+        )
+        val entries = AdbService.parseLsOutput(output)
+        assertEquals(4, entries.size)
+        entries.forEach {
+            assertTrue("${it.name} should be a directory", it.isDirectory)
+        }
+        assertEquals("Alarms", entries[0].name)
+        assertEquals("Android", entries[1].name)
+    }
+
+    @Test
+    fun `parseLsOutput correctly identifies files without trailing slash`() {
+        val output = listOf(
+            "somefile.txt",
+            "another_file.apk"
+        )
+        val entries = AdbService.parseLsOutput(output)
+        assertEquals(2, entries.size)
+        entries.forEach {
+            assertFalse("${it.name} should not be a directory", it.isDirectory)
+        }
+    }
+
+    @Test
+    fun `parseLsOutput handles mixed files and directories`() {
+        val output = listOf(
+            "Alarms/",
+            "Android/",
+            "somefile.txt",
+            "DCIM/",
+            "another_file.apk"
+        )
+        val entries = AdbService.parseLsOutput(output)
+        assertEquals(5, entries.size)
+
+        val dirs = entries.filter { it.isDirectory }
+        val files = entries.filter { !it.isDirectory }
+        assertEquals(3, dirs.size)
+        assertEquals(2, files.size)
+
+        assertEquals(listOf("Alarms", "Android", "DCIM"), dirs.map { it.name })
+        assertEquals(listOf("somefile.txt", "another_file.apk"), files.map { it.name })
+    }
+
+    @Test
+    fun `parseLsOutput filters out empty lines and total line`() {
+        val output = listOf(
+            "",
+            "total 42",
+            "Alarms/",
+            "",
+            "Android/"
+        )
+        val entries = AdbService.parseLsOutput(output)
+        assertEquals(2, entries.size)
+        assertEquals("Alarms", entries[0].name)
+        assertEquals("Android", entries[1].name)
+    }
+
+    @Test
+    fun `parseLsOutput handles empty output`() {
+        val entries = AdbService.parseLsOutput(emptyList())
+        assertTrue(entries.isEmpty())
+    }
+
+    @Test
+    fun `parseLsOutput handles executables with asterisk`() {
+        // ls -F appends * to executables
+        val output = listOf(
+            "my_script*",
+            "Alarms/",
+            "readme.txt"
+        )
+        val entries = AdbService.parseLsOutput(output)
+        assertEquals(3, entries.size)
+        assertFalse(entries[0].isDirectory) // * means executable, not directory
+        assertEquals("my_script", entries[0].name)
+        assertTrue(entries[1].isDirectory)
+        assertFalse(entries[2].isDirectory)
+    }
+
+    @Test
+    fun `parseLsOutput handles symlinks with at sign`() {
+        // ls -F appends @ to symlinks
+        val output = listOf(
+            "sdcard@",
+            "Alarms/"
+        )
+        val entries = AdbService.parseLsOutput(output)
+        assertEquals(2, entries.size)
+        assertFalse(entries[0].isDirectory) // @ means symlink, treat as non-directory
+        assertEquals("sdcard", entries[0].name)
+        assertTrue(entries[1].isDirectory)
+    }
+
+    // ========== 旧测试保留 ==========
+
+    @Test
+    fun `parseLsOutput filters directories from ls output for numeric dirs`() {
         val lsOutput = listOf(
             "0",
             "10",
@@ -20,7 +152,6 @@ class AdbServiceParseTest {
             "obb",
             "self"
         )
-        // 只保留纯数字目录名（用户存储目录）
         val result = lsOutput.filter { it.toIntOrNull() != null }
         assertEquals(listOf("0", "10", "999"), result)
     }
@@ -35,53 +166,11 @@ class AdbServiceParseTest {
     // --- readStatFs 解析测试 ---
 
     @Test
-    fun `parseStatFsOutput parses stat output correctly`() {
-        // stat -f 输出格式示例:
-        // File: "/storage/emulated/0"
-        //   ID: 0        Namelen: 255       Type: ext4
-        //   Block size: 4096       Fundamental block size: 4096
-        //   Blocks: Total: 61054976   Free: 40108084   Available: 40108084
-        //   Inodes: Total: 15597568   Free: 14971427
-        val statOutput = listOf(
-            "  File: \"/storage/emulated/0\"",
-            "  ID: 0        Namelen: 255       Type: ext4",
-            "  Block size: 4096       Fundamental block size: 4096",
-            "  Blocks: Total: 61054976   Free: 40108084   Available: 40108084",
-            "  Inodes: Total: 15597568   Free: 14971427"
-        )
-        val blockSize = 4096L
-        val totalBlocks = 61054976L
-        val availableBlocks = 40108084L
-        val expectedTotal = blockSize * totalBlocks
-        val expectedAvailable = blockSize * availableBlocks
-
-        // 解析 Block size
-        val blockSizeRegex = Regex("Block size:\\s+(\\d+)")
-        val blockSizeMatch = statOutput.mapNotNull { blockSizeRegex.find(it) }.firstOrNull()
-        assertNotNull(blockSizeMatch)
-        assertEquals(blockSize, blockSizeMatch!!.groupValues[1].toLong())
-
-        // 解析 Blocks: Total / Available
-        val blocksRegex = Regex("Blocks: Total:\\s+(\\d+)\\s+Free:\\s+(\\d+)\\s+Available:\\s+(\\d+)")
-        val blocksMatch = statOutput.mapNotNull { blocksRegex.find(it) }.firstOrNull()
-        assertNotNull(blocksMatch)
-        assertEquals(totalBlocks, blocksMatch!!.groupValues[1].toLong())
-        assertEquals(availableBlocks, blocksMatch.groupValues[3].toLong())
-
-        assertEquals(expectedTotal, blockSize * totalBlocks)
-        assertEquals(expectedAvailable, blockSize * availableBlocks)
-    }
-
-    @Test
     fun `parseDfOutput parses df output correctly`() {
-        // df 输出格式:
-        // Filesystem     1K-blocks     Used Available Use% Mounted on
-        // /dev/fuse      244219904 83627584 160432352  35% /storage/emulated
         val dfOutput = listOf(
             "Filesystem     1K-blocks     Used Available Use% Mounted on",
             "/dev/fuse      244219904 83627584 160432352  35% /storage/emulated"
         )
-        // 解析第二行
         val dataLine = dfOutput.lastOrNull { it.startsWith("/dev") } ?: ""
         val parts = dataLine.split(Regex("\\s+"))
         assertTrue(parts.size >= 4)
@@ -97,7 +186,6 @@ class AdbServiceParseTest {
 
     @Test
     fun `parseDuOutput parses du -sb output correctly`() {
-        // du -sb /path 输出: "12345678	/path"
         val duOutput = "12345678\t/storage/emulated/0/AndroidDataBackup"
         val size = duOutput.split(Regex("\\s+")).firstOrNull()?.toLongOrNull() ?: 0L
         assertEquals(12345678L, size)

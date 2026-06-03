@@ -354,26 +354,84 @@ object AdbService {
     // ========== ADB 模式下目录选择所需的文件操作 ==========
 
     /**
+     * 构建 ls 命令参数
+     * 使用 -1F 标志：-1 每行一个条目，-F 添加类型指示符（/ 目录，* 可执行，@ 符号链接）
+     * @param path 要列出的目录路径
+     * @param listFiles 是否包含文件
+     * @param listDirs 是否包含目录
+     * @return 命令参数数组
+     */
+    fun buildLsCommand(path: String, listFiles: Boolean = true, listDirs: Boolean = true): Array<String> {
+        val args = mutableListOf("ls", "-1F")
+        if (listDirs && !listFiles) args.add("-d")
+        if (!listDirs && listFiles) args.add("-p")
+        // 确保路径以 / 结尾，避免 ls 将 / 作为单独参数列出根目录
+        val normalizedPath = if (path.endsWith("/")) path else "$path/"
+        args.add(normalizedPath)
+        return args.toTypedArray()
+    }
+
+    /**
+     * 解析 ls -1F 的输出，区分文件和目录
+     * ls -F 在目录名后添加 /，可执行文件后添加 *，符号链接后添加 @
+     * @param output ls 命令的输出行
+     * @return 解析后的条目列表
+     */
+    fun parseLsOutput(output: List<String>): List<LsEntry> {
+        return output.mapNotNull { line ->
+            val trimmed = line.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("total")) return@mapNotNull null
+
+            when {
+                trimmed.endsWith("/") -> LsEntry(
+                    name = trimmed.dropLast(1),
+                    isDirectory = true,
+                )
+                trimmed.endsWith("*") -> LsEntry(
+                    name = trimmed.dropLast(1),
+                    isDirectory = false,
+                )
+                trimmed.endsWith("@") -> LsEntry(
+                    name = trimmed.dropLast(1),
+                    isDirectory = false,
+                )
+                else -> LsEntry(
+                    name = trimmed,
+                    isDirectory = false,
+                )
+            }
+        }
+    }
+
+    /**
      * 列出指定路径下的子目录/文件路径（ADB 模式替代 rootService.listFilePaths）
+     * 使用 ls -1F 命令，通过 -F 标志的类型指示符区分文件和目录
      * @param path 要列出的目录路径
      * @param listFiles 是否包含文件
      * @param listDirs 是否包含目录
      * @return 路径列表
      */
     fun listFilePaths(path: String, listFiles: Boolean = true, listDirs: Boolean = true): List<String> {
-        val args = mutableListOf("ls")
-        if (listDirs && !listFiles) args.add("-d") // 只显示目录
-        if (!listDirs && listFiles) args.add("-p") // 只显示文件（非目录后加/）
-        args.add(path)
-        args.add("/") // ls path/ 确保列出内容
-        val result = execute(*args.toTypedArray())
+        val cmd = buildLsCommand(path, listFiles, listDirs)
+        val result = execute(*cmd)
         if (!result.isSuccess) return emptyList()
-        return result.out.mapNotNull { line ->
-            val name = line.trim()
-            if (name.isNotEmpty() && !name.startsWith("total")) {
-                "$path/$name"
-            } else null
-        }
+        val entries = parseLsOutput(result.out)
+        return entries
+            .filter { (listDirs && it.isDirectory) || (listFiles && !it.isDirectory) }
+            .map { "${path}/${it.name}" }
+    }
+
+    /**
+     * 遍历目录并返回子项信息（用于 PickYouLauncher 的 traverseBackend）
+     * 单次 ADB 调用完成遍历，避免对每个条目单独调用 test -d
+     * @param path 要遍历的目录路径
+     * @return 解析后的条目列表
+     */
+    fun traverseDirectory(path: String): List<LsEntry> {
+        val cmd = buildLsCommand(path)
+        val result = execute(*cmd)
+        if (!result.isSuccess) return emptyList()
+        return parseLsOutput(result.out)
     }
 
     /**
@@ -434,3 +492,11 @@ data class AdbResult(
     val outString: String get() = out.joinToString("\n")
     val errString: String get() = err.joinToString("\n")
 }
+
+/**
+ * ls 输出条目，表示一个文件或目录
+ */
+data class LsEntry(
+    val name: String,
+    val isDirectory: Boolean,
+)

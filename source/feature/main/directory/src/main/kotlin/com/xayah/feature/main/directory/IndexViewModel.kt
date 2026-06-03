@@ -71,22 +71,23 @@ class IndexViewModel @Inject constructor(
                     val isAdb = permissionMode == PermissionMode.ADB
 
                     PickYouLauncher(
-                        checkPermission = true,
+                        // ADB 模式下禁用库的权限检查：使用 Shizuku 访问文件，不需要 MANAGE_EXTERNAL_STORAGE
+                        // 避免库内部检查 Environment.isExternalStorageManager() 导致权限弹窗阻塞
+                        checkPermission = !isAdb,
                         title = activity.getString(R.string.select_target_directory),
                         pickerType = PickerType.DIRECTORY,
                         permissionType = if (isAdb) PermissionType.NORMAL else PermissionType.ROOT,
                         traverseBackend = if (isAdb) { pathString ->
-                            // ADB 模式下使用 AdbService 遍历目录
-                            val paths = AdbService.listFilePaths(pathString)
+                            // ADB 模式下使用 AdbService.traverseDirectory 遍历目录
+                            // 单次 ls -1F 调用完成遍历，避免逐个 test -d 的 N+1 问题
+                            val entries = AdbService.traverseDirectory(pathString)
                             val files = mutableListOf<FileParcelable>()
                             val directories = mutableListOf<FileParcelable>()
-                            for (path in paths) {
-                                val name = path.substringAfterLast("/")
-                                val isDir = AdbService.execute("test", "-d", path).isSuccess
-                                if (isDir) {
-                                    directories.add(FileParcelable(name, 0))
+                            for (entry in entries) {
+                                if (entry.isDirectory) {
+                                    directories.add(FileParcelable(entry.name, 0))
                                 } else {
-                                    files.add(FileParcelable(name, 0))
+                                    files.add(FileParcelable(entry.name, 0))
                                 }
                             }
                             DirChildrenParcelable(files = files, directories = directories)
