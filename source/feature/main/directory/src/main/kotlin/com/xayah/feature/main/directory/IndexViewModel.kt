@@ -16,6 +16,7 @@ import com.xayah.core.ui.viewmodel.UiState
 import com.xayah.core.util.adb.AdbService
 import com.xayah.libpickyou.PickYouLauncher
 import com.xayah.libpickyou.parcelables.DirChildrenParcelable
+import com.xayah.libpickyou.parcelables.FileParcelable
 import com.xayah.libpickyou.ui.model.PermissionType
 import com.xayah.libpickyou.ui.model.PickerType
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -77,13 +78,15 @@ class IndexViewModel @Inject constructor(
                         traverseBackend = if (isAdb) { pathString ->
                             // ADB 模式下使用 AdbService 遍历目录
                             val paths = AdbService.listFilePaths(pathString)
-                            val files = mutableListOf<String>()
-                            val directories = mutableListOf<String>()
+                            val files = mutableListOf<FileParcelable>()
+                            val directories = mutableListOf<FileParcelable>()
                             for (path in paths) {
-                                if (AdbService.execute("test", "-d", path).isSuccess) {
-                                    directories.add(path)
+                                val name = path.substringAfterLast("/")
+                                val isDir = AdbService.execute("test", "-d", path).isSuccess
+                                if (isDir) {
+                                    directories.add(FileParcelable(name, 0))
                                 } else {
-                                    files.add(path)
+                                    files.add(FileParcelable(name, 0))
                                 }
                             }
                             DirChildrenParcelable(files = files, directories = directories)
