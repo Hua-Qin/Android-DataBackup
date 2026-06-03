@@ -20,6 +20,7 @@ import com.xayah.core.datastore.di.Dispatcher
 import com.xayah.core.datastore.readCustomSUFile
 import com.xayah.core.datastore.readLoadSystemApps
 import com.xayah.core.datastore.readLoadedIconMD5
+import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.datastore.saveLoadedIconMD5
 import com.xayah.core.hiddenapi.castTo
 import com.xayah.core.model.App
@@ -28,6 +29,7 @@ import com.xayah.core.model.DataState
 import com.xayah.core.model.DataType
 import com.xayah.core.model.DefaultPreserveId
 import com.xayah.core.model.OpType
+import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.SettingsData
 import com.xayah.core.model.UserInfo
 import com.xayah.core.model.database.LabelAppCrossRefEntity
@@ -50,6 +52,8 @@ import com.xayah.core.util.PathUtil
 import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.command.PackageUtil
 import com.xayah.core.util.command.Tar
+import com.xayah.core.util.adb.AdbService
+import com.xayah.core.util.adb.AdbPackageInfo
 import com.xayah.core.util.filesDir
 import com.xayah.core.util.iconDir
 import com.xayah.core.util.localBackupSaveDir
@@ -74,6 +78,9 @@ class AppsRepo @Inject constructor(
     private val pathUtil: PathUtil,
     private val cloudRepo: CloudRepository
 ) {
+    private suspend fun isAdbMode(): Boolean {
+        return context.readPermissionMode().first() == PermissionMode.ADB
+    }
     fun getBackups(filters: Flow<Filters>): Flow<Set<String>> = combine(
         filters,
         appsDao.queryPackagesFlow(opType = OpType.RESTORE).flowOn(defaultDispatcher),
@@ -84,9 +91,24 @@ class AppsRepo @Inject constructor(
     fun getInstalledApps(users: Flow<List<UserInfo>>): Flow<Set<String>> = users.map { u ->
         val set = mutableSetOf<String>()
         u.forEach {
-            set.addAll(rootService.getInstalledPackagesAsUser(0, it.id).map { p -> "${p.packageName}-${it.id}" }.toSet())
+            if (isAdbModeBlocking()) {
+                AdbService.getInstalledPackageNames(it.id).forEach { pkg ->
+                    set.add("$pkg-${it.id}")
+                }
+            } else {
+                rootService.getInstalledPackagesAsUser(0, it.id).map { p -> "${p.packageName}-${it.id}" }.toSet().also { s -> set.addAll(s) }
+            }
         }
         set
+    }
+
+    private fun isAdbModeBlocking(): Boolean {
+        return try {
+            val mode = runBlocking { context.readPermissionMode().first() }
+            mode == PermissionMode.ADB
+        } catch (e: Exception) {
+            false
+        }
     }
 
     fun getApp(id: Long) = appsDao.queryPackageFlow(id).flowOn(defaultDispatcher)
@@ -196,13 +218,14 @@ class AppsRepo @Inject constructor(
      * Faster than [fastInitialize] if there are too many newly installed apps.
      */
     suspend fun fullInitialize(onInit: suspend (cur: Int, max: Int, content: String) -> Unit) {
+        val adbMode = isAdbMode()
         val loadSystemApps = context.readLoadSystemApps().first()
         val settings = settingsDataRepo.settingsData.first()
         val pm = context.packageManager
-        val userInfoList = rootService.getUsers()
+        val userInfoList = if (adbMode) AdbService.getUsers().map { com.xayah.core.model.UserInfo(it, context.getString(R.string.user)) } else rootService.getUsers().map { UserInfo(it.id, it.name) }
         for (userInfo in userInfoList) {
             val userId = userInfo.id
-            val installedPackages = getInstalledPackages(userId)
+            val installedPackages = getInstalledPackages(userId, adbMode)
             val storedSet = appsDao.queryPkgSetByUserId(OpType.BACKUP, userId).toSet()
 
             // Remove uninstalled apps
@@ -227,13 +250,14 @@ class AppsRepo @Inject constructor(
      * Initialize only newly installed apps or remove uninstalled apps.
      */
     suspend fun fastInitialize(onInit: suspend (cur: Int, max: Int, content: String) -> Unit) {
+        val adbMode = isAdbMode()
         val loadSystemApps = context.readLoadSystemApps().first()
         val settings = settingsDataRepo.settingsData.first()
         val pm = context.packageManager
-        val userInfoList = rootService.getUsers()
+        val userInfoList = if (adbMode) AdbService.getUsers().map { com.xayah.core.model.UserInfo(it, context.getString(R.string.user)) } else rootService.getUsers().map { UserInfo(it.id, it.name) }
         for (userInfo in userInfoList) {
             val userId = userInfo.id
-            val installedPackages = getInstalledPackages(userId).map { it.packageName }.toSet()
+            val installedPackages = getInstalledPackages(userId, adbMode).map { it.packageName }.toSet()
             val storedSet = appsDao.queryPkgSetByUserId(OpType.BACKUP, userId).toSet()
 
             // Remove uninstalled apps
@@ -245,11 +269,22 @@ class AppsRepo @Inject constructor(
             val missingPackages = installedPackages.subtract(storedSet)
             missingPackages.forEachIndexed { index, pkg ->
                 onInit(index, missingPackages.size, pkg)
-                val info = rootService.getPackageInfoAsUser(pkg, 0, userId)
-                if (info != null) {
-                    val isSystemApp = ((info.applicationInfo?.flags ?: 0) and ApplicationInfo.FLAG_SYSTEM) != 0
-                    if (loadSystemApps || isSystemApp.not()) {
-                        apps.add(initializeApp(settings, pm, userId, info))
+                if (adbMode) {
+                    // ADB 模式下使用 AdbService 获取包信息
+                    val adbInfo = AdbService.getPackageInfo(pkg, userId)
+                    if (adbInfo != null) {
+                        val isSystemApp = (adbInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                        if (loadSystemApps || isSystemApp.not()) {
+                            apps.add(initializeAppFromAdb(settings, pm, userId, adbInfo))
+                        }
+                    }
+                } else {
+                    val info = rootService.getPackageInfoAsUser(pkg, 0, userId)
+                    if (info != null) {
+                        val isSystemApp = ((info.applicationInfo?.flags ?: 0) and ApplicationInfo.FLAG_SYSTEM) != 0
+                        if (loadSystemApps || isSystemApp.not()) {
+                            apps.add(initializeApp(settings, pm, userId, info))
+                        }
                     }
                 }
             }
@@ -299,19 +334,58 @@ class AppsRepo @Inject constructor(
         )
     }
 
+    private fun initializeAppFromAdb(settings: SettingsData, pm: PackageManager, userId: Int, info: AdbPackageInfo): PackageEntity {
+        return PackageEntity(
+            id = 0,
+            indexInfo = PackageIndexInfo(
+                opType = OpType.BACKUP,
+                packageName = info.packageName,
+                userId = userId,
+                compressionType = settings.compressionType,
+                preserveId = DefaultPreserveId,
+                cloud = "",
+                backupDir = "",
+            ),
+            packageInfo = PackageInfo(
+                info.packageName, // ADB 模式下无法获取应用标签，使用包名
+                versionName = info.versionName,
+                versionCode = info.versionCode,
+                flags = info.flags,
+                firstInstallTime = info.firstInstallTime,
+                lastUpdateTime = info.lastUpdateTime,
+            ),
+            extraInfo = PackageExtraInfo(
+                uid = info.uid,
+                hasKeystore = false,
+                permissions = listOf(),
+                ssaid = "",
+                lastBackupTime = 0L,
+                blocked = false,
+                activated = false,
+                firstUpdated = false,
+                enabled = info.enabled,
+            ),
+            dataStates = PackageDataStates(),
+            storageStats = PackageStorageStats(),
+            dataStats = PackageDataStats(),
+            displayStats = PackageDataStats(),
+        )
+    }
+
     suspend fun fullUpdate(onUpdate: suspend (cur: Int, max: Int, content: String) -> Unit) {
+        val adbMode = isAdbMode()
         val pm = context.packageManager
-        val userInfoList = rootService.getUsers()
+        val userInfoList = if (adbMode) AdbService.getUsers().map { com.xayah.core.model.UserInfo(it, context.getString(R.string.user)) } else rootService.getUsers().map { UserInfo(it.id, it.name) }
         BaseUtil.mkdirs(context.iconDir())
         for (userInfo in userInfoList) {
             val userId = userInfo.id
-            val userHandle = rootService.getUserHandle(userId)
+            val userHandle = if (adbMode) null else rootService.getUserHandle(userId)
             val apps = appsDao.queryPkgEntitiesByUserId(OpType.BACKUP, userId)
             val updateList = mutableListOf<PackageUpdateEntity>()
 
             apps.forEachIndexed { index, pkg ->
                 onUpdate(index, apps.size, pkg.packageName)
-                val updateEntity = updateApp(pm, pkg, userId, userHandle)
+                val updateEntity = updateApp(pm, pkg, userId, userHandle, adbMode)
                 if (updateEntity != null) {
                     updateList.add(updateEntity)
                 }
@@ -321,6 +395,7 @@ class AppsRepo @Inject constructor(
     }
 
     suspend fun fastUpdate(onUpdate: suspend (cur: Int, max: Int, content: String) -> Unit) {
+        val adbMode = isAdbMode()
         val pm = context.packageManager
         val apps = appsDao.queryFirstUpdatedApps(opType = OpType.BACKUP, firstUpdated = false)
         val updateList = mutableListOf<PackageUpdateEntity>()
@@ -328,8 +403,8 @@ class AppsRepo @Inject constructor(
         apps.forEachIndexed { index, pkg ->
             onUpdate(index, apps.size, pkg.packageName)
             val userId = pkg.userId
-            val userHandle = rootService.getUserHandle(userId)
-            val updateEntity = updateApp(pm, pkg, userId, userHandle)
+            val userHandle = if (adbMode) null else rootService.getUserHandle(userId)
+            val updateEntity = updateApp(pm, pkg, userId, userHandle, adbMode)
             if (updateEntity != null) {
                 updateList.add(updateEntity)
             }
@@ -338,17 +413,62 @@ class AppsRepo @Inject constructor(
     }
 
     suspend fun updateApp(pkg: PackageEntity, userId: Int) {
+        val adbMode = isAdbMode()
         val pm = context.packageManager
-        val userHandle = rootService.getUserHandle(userId)
-        val updateEntity = updateApp(pm, pkg, userId, userHandle)
+        val userHandle = if (adbMode) null else rootService.getUserHandle(userId)
+        val updateEntity = updateApp(pm, pkg, userId, userHandle, adbMode)
         if (updateEntity != null) {
             appsDao.update(updateEntity)
         }
     }
 
-    private suspend fun updateApp(pm: PackageManager, pkg: PackageEntity, userId: Int, userHandle: UserHandle?): PackageUpdateEntity? {
-        val info = rootService.getPackageInfoAsUser(pkg.packageName, PackageManager.GET_PERMISSIONS, userId)
+    private suspend fun updateApp(pm: PackageManager, pkg: PackageEntity, userId: Int, userHandle: UserHandle?, adbMode: Boolean = false): PackageUpdateEntity? {
         val updateEntity = PackageUpdateEntity(pkg.id, pkg.packageInfo, pkg.extraInfo, pkg.storageStats)
+
+        if (adbMode) {
+            // ADB 模式下使用 AdbService 获取包信息
+            val adbInfo = AdbService.getPackageInfo(pkg.packageName, userId)
+            if (adbInfo != null) {
+                runCatching {
+                    val iconPath: String
+                    val icon: Drawable?
+                    val iconDrawable = runCatching { context.packageManager.getApplicationIcon(pkg.packageName) }.getOrElse { AppCompatResources.getDrawable(context, android.R.drawable.sym_def_app_icon) }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && iconDrawable is AdaptiveIconDrawable) {
+                        iconPath = pathUtil.getPackageIconPath(pkg.packageName, true)
+                        icon = LayerDrawable(arrayOf(iconDrawable.background, iconDrawable.foreground))
+                    } else {
+                        iconPath = pathUtil.getPackageIconPath(pkg.packageName, false)
+                        icon = iconDrawable
+                    }
+                    if (icon != null) {
+                        BaseUtil.writeIcon(icon = icon, dst = iconPath)
+                    }
+                }.withLog()
+
+                updateEntity.packageInfo.label = pkg.packageName // ADB 模式下使用包名作为标签
+                updateEntity.packageInfo.versionName = adbInfo.versionName
+                updateEntity.packageInfo.versionCode = adbInfo.versionCode
+                updateEntity.packageInfo.flags = adbInfo.flags
+                updateEntity.packageInfo.firstInstallTime = adbInfo.firstInstallTime
+                updateEntity.packageInfo.lastUpdateTime = adbInfo.lastUpdateTime
+
+                updateEntity.extraInfo.firstUpdated = true
+                updateEntity.extraInfo.uid = adbInfo.uid
+                updateEntity.extraInfo.permissions = AdbService.getPermissions(pkg.packageName)
+                updateEntity.extraInfo.hasKeystore = false // ADB 模式下无法检查 keystore
+                updateEntity.extraInfo.ssaid = "" // ADB 模式下无法获取 SSAID
+                updateEntity.extraInfo.enabled = adbInfo.enabled
+
+                // ADB 模式下无法获取 StorageStats
+                return updateEntity
+            } else {
+                appsDao.delete(updateEntity.id)
+                return null
+            }
+        }
+
+        // ROOT 模式原有逻辑
+        val info = rootService.getPackageInfoAsUser(pkg.packageName, PackageManager.GET_PERMISSIONS, userId)
         if (info != null) {
             runCatching {
                 val iconPath: String
@@ -402,9 +522,32 @@ class AppsRepo @Inject constructor(
         }
     }
 
-    private suspend fun getInstalledPackages(userId: Int) = rootService.getInstalledPackagesAsUser(0, userId).filter {
-        // Filter itself
-        it.packageName != context.packageName
+    private suspend fun getInstalledPackages(userId: Int, adbMode: Boolean = false): List<android.content.pm.PackageInfo> {
+        if (adbMode) {
+            // ADB 模式下使用 AdbService 获取包名列表，然后构造 PackageInfo
+            val pkgNames = AdbService.getInstalledPackageNames(userId)
+            return pkgNames.map { pkgName ->
+                android.content.pm.PackageInfo().apply {
+                    packageName = pkgName
+                    // 尝试从 PackageManager 获取信息（不需要 ROOT）
+                    try {
+                        val appInfo = context.packageManager.getApplicationInfo(pkgName, 0)
+                        applicationInfo = appInfo
+                        versionName = context.packageManager.getPackageInfo(pkgName, 0).versionName
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            longVersionCode = context.packageManager.getPackageInfo(pkgName, 0).longVersionCode
+                        }
+                        firstInstallTime = context.packageManager.getPackageInfo(pkgName, 0).firstInstallTime
+                        lastUpdateTime = context.packageManager.getPackageInfo(pkgName, 0).lastUpdateTime
+                    } catch (e: Exception) {
+                        // 系统应用可能无法通过 PackageManager 获取
+                    }
+                }
+            }.filter { it.packageName != context.packageName }
+        }
+        return rootService.getInstalledPackagesAsUser(0, userId).filter {
+            it.packageName != context.packageName
+        }
     }
 
     suspend fun load(cloudName: String?, onLoad: suspend (cur: Int, max: Int, content: String) -> Unit) {
@@ -420,10 +563,12 @@ class AppsRepo @Inject constructor(
     }
 
     private suspend fun loadLocalIcons() {
+        val adbMode = isAdbMode()
         val archivePath = "${pathUtil.getLocalBackupConfigsDir()}/$IconRelativeDir.${CompressionType.TAR.suffix}"
-        if (rootService.exists(archivePath)) {
+        val archiveExists = if (adbMode) AdbService.exists(archivePath) else rootService.exists(archivePath)
+        if (archiveExists) {
             val loadedIconMD5 = context.readLoadedIconMD5().first()
-            val iconMD5 = rootService.calculateMD5(archivePath) ?: ""
+            val iconMD5 = if (adbMode) AdbService.calculateMD5(archivePath) ?: "" else rootService.calculateMD5(archivePath) ?: ""
             if (loadedIconMD5 != iconMD5) {
                 Tar.decompress(src = archivePath, dst = context.filesDir(), extra = CompressionType.TAR.decompressPara)
                 PathUtil.setFilesDirSELinux(context)
@@ -469,14 +614,27 @@ class AppsRepo @Inject constructor(
     }
 
     private suspend fun loadLocalApps(onLoad: suspend (cur: Int, max: Int, content: String) -> Unit) {
+        val adbMode = isAdbMode()
         val path = pathUtil.getLocalBackupAppsDir()
-        val paths = rootService.walkFileTree(path)
+        val paths = if (adbMode) {
+            // ADB 模式下使用 find 遍历文件树
+            AdbService.walkFileTree(path).map { PathParcelable(it.split("/")) }
+        } else {
+            rootService.walkFileTree(path)
+        }
         paths.forEachIndexed { index, pathParcelable ->
             val fileName = PathUtil.getFileName(pathParcelable.pathString)
             onLoad(index, paths.size, fileName)
             if (fileName == ConfigsPackageRestoreName) {
                 runCatching {
-                    rootService.readJson<PackageEntity>(pathParcelable.pathString).also { p ->
+                    val jsonText = if (adbMode) {
+                        AdbService.readJsonText(pathParcelable.pathString)
+                    } else {
+                        null // ROOT 模式下直接使用 readJson
+                    }
+                    if (adbMode && jsonText != null) {
+                        // ADB 模式下：从 JSON 文本解析
+                        val p = GsonUtil().fromJson<PackageEntity>(jsonText, object : com.google.gson.reflect.TypeToken<PackageEntity>() {}.type)
                         p?.id = 0
                         p?.extraInfo?.activated = false
                         p?.indexInfo?.cloud = ""
@@ -487,18 +645,41 @@ class AppsRepo @Inject constructor(
                                 p?.indexInfo?.userId = uId
                             }
                         }
-                    }?.apply {
-                        if (appsDao.query(packageName, indexInfo.opType, userId, preserveId, indexInfo.compressionType, indexInfo.cloud, indexInfo.backupDir) == null) {
-                            appsDao.upsert(this)
+                        p?.apply {
+                            if (appsDao.query(packageName, indexInfo.opType, userId, preserveId, indexInfo.compressionType, indexInfo.cloud, indexInfo.backupDir) == null) {
+                                appsDao.upsert(this)
+                            }
+                        }
+                    } else if (!adbMode) {
+                        rootService.readJson<PackageEntity>(pathParcelable.pathString).also { p ->
+                            p?.id = 0
+                            p?.extraInfo?.activated = false
+                            p?.indexInfo?.cloud = ""
+                            p?.indexInfo?.backupDir = context.localBackupSaveDir()
+                            parsePreserveAndUserId(pathParcelable).also { result ->
+                                result?.also { (pId, uId) ->
+                                    p?.indexInfo?.preserveId = pId
+                                    p?.indexInfo?.userId = uId
+                                }
+                            }
+                        }?.apply {
+                            if (appsDao.query(packageName, indexInfo.opType, userId, preserveId, indexInfo.compressionType, indexInfo.cloud, indexInfo.backupDir) == null) {
+                                appsDao.upsert(this)
+                            }
                         }
                     }
                 }
             }
         }
-        rootService.clearEmptyDirectoriesRecursively(path)
+        if (adbMode) {
+            AdbService.clearEmptyDirectoriesRecursively(path)
+        } else {
+            rootService.clearEmptyDirectoriesRecursively(path)
+        }
         appsDao.queryPackages(OpType.RESTORE, "", context.localBackupSaveDir()).forEach {
             val src = "${path}/${it.archivesRelativeDir}"
-            if (rootService.exists(src).not()) {
+            val exists = if (adbMode) AdbService.exists(src) else rootService.exists(src)
+            if (exists.not()) {
                 appsDao.delete(it.id)
             }
         }

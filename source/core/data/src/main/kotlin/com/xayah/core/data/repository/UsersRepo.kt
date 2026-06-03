@@ -5,9 +5,12 @@ import com.xayah.core.data.R
 import com.xayah.core.database.dao.PackageDao
 import com.xayah.core.datastore.di.DbDispatchers.Default
 import com.xayah.core.datastore.di.Dispatcher
+import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.model.OpType
+import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.UserInfo
 import com.xayah.core.rootservice.service.RemoteRootService
+import com.xayah.core.util.adb.AdbService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
@@ -24,9 +27,12 @@ class UsersRepo @Inject constructor(
 ) {
     fun getUsers(opType: OpType): Flow<List<UserInfo>> = when (opType) {
         OpType.BACKUP -> flow {
-            emit(
-                rootService.getUsers().map { UserInfo(it.id, it.name) }
-            )
+            val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
+            if (adbMode) {
+                emit(AdbService.getUsers().map { UserInfo(it, context.getString(R.string.user)) })
+            } else {
+                emit(rootService.getUsers().map { UserInfo(it.id, it.name) })
+            }
         }.flowOn(defaultDispatcher)
 
         OpType.RESTORE -> appsDao.queryUserIdsFlow(opType).map { it.map { u -> UserInfo(u, context.getString(R.string.user)) } }

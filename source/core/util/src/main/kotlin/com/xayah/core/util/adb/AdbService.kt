@@ -481,6 +481,216 @@ object AdbService {
         val result = execute("mkdir", "-p", path)
         return result.isSuccess
     }
+
+    // ========== ADB 模式下应用列表初始化所需的操作 ==========
+
+    /**
+     * 获取用户列表（ADB 模式替代 rootService.getUsers）
+     * 使用 pm list users 命令
+     * @return 用户ID列表
+     */
+    fun getUsers(): List<Int> {
+        return getUsersInternal()
+    }
+
+    /**
+     * 获取已安装应用的包名列表（ADB 模式替代 rootService.getInstalledPackagesAsUser）
+     * 使用 pm list packages 命令
+     * @param userId 用户ID
+     * @return 包名列表
+     */
+    fun getInstalledPackageNames(userId: Int = 0): List<String> {
+        val args = mutableListOf("pm", "list", "packages", "--user", userId.toString())
+        val result = execute(*args.toTypedArray())
+        if (!result.isSuccess) return emptyList()
+        return result.out.mapNotNull { line ->
+            if (line.startsWith("package:")) line.substring("package:".length).trim() else null
+        }
+    }
+
+    /**
+     * 获取应用信息（ADB 模式替代 rootService.getPackageInfoAsUser 的部分功能）
+     * 使用 dumpsys package 命令获取关键信息
+     * @param packageName 包名
+     * @param userId 用户ID
+     * @return AdbPackageInfo 或 null
+     */
+    fun getPackageInfo(packageName: String, userId: Int = 0): AdbPackageInfo? {
+        val result = execute("dumpsys", "package", "--user", userId.toString(), packageName)
+        if (!result.isSuccess) return null
+
+        var versionName = ""
+        var versionCode = 0L
+        var flags = 0
+        var firstInstallTime = 0L
+        var lastUpdateTime = 0L
+        var uid = -1
+        var enabled = true
+
+        for (line in result.out) {
+            val trimmed = line.trim()
+            when {
+                trimmed.startsWith("versionName=") -> versionName = trimmed.substringAfter("=")
+                trimmed.startsWith("versionCode=") -> versionCode = trimmed.substringAfter("=").toLongOrNull() ?: 0L
+                trimmed.startsWith("flags=") -> flags = trimmed.substringAfter("=").substringBefore(" ").toIntOrNull() ?: 0
+                trimmed.startsWith("firstInstallTime=") -> firstInstallTime = trimmed.substringAfter("=").substringBefore(" ").toLongOrNull() ?: 0L
+                trimmed.startsWith("lastUpdateTime=") -> lastUpdateTime = trimmed.substringAfter("=").substringBefore(" ").toLongOrNull() ?: 0L
+                trimmed.startsWith("userId=") -> uid = trimmed.substringAfter("=").substringBefore(" ").toIntOrNull() ?: -1
+                trimmed.startsWith("pkgFlags=[") -> {
+                    // 解析 pkgFlags 获取 FLAG_SYSTEM 等
+                    val flagsStr = trimmed.substringAfter("[").substringBefore("]")
+                    if (flagsStr.contains("SYSTEM")) flags = flags or 0x1 // ApplicationInfo.FLAG_SYSTEM
+                }
+            }
+        }
+
+        // 检查是否禁用
+        val enabledResult = execute("pm", "list", "packages", "-d", "--user", userId.toString(), packageName)
+        if (enabledResult.isSuccess && enabledResult.out.any { it.contains(packageName) }) {
+            enabled = false
+        }
+
+        return AdbPackageInfo(
+            packageName = packageName,
+            versionName = versionName,
+            versionCode = versionCode,
+            flags = flags,
+            firstInstallTime = firstInstallTime,
+            lastUpdateTime = lastUpdateTime,
+            uid = uid,
+            enabled = enabled,
+        )
+    }
+
+    /**
+     * 获取应用的 APK 路径列表（ADB 模式替代 rootService.getPackageSourceDir）
+     * @param packageName 包名
+     * @return APK 路径列表
+     */
+    fun getPackageSourceDir(packageName: String): List<String> {
+        val result = execute("pm", "path", packageName)
+        if (!result.isSuccess) return emptyList()
+        return result.out.mapNotNull { line ->
+            if (line.startsWith("package:")) line.substring("package:".length) else null
+        }
+    }
+
+    /**
+     * 递归遍历文件树（ADB 模式替代 rootService.walkFileTree）
+     * 使用 find 命令
+     * @param path 根路径
+     * @return 路径列表
+     */
+    fun walkFileTree(path: String): List<String> {
+        val result = execute("find", path, "-type", "f")
+        if (!result.isSuccess) return emptyList()
+        return result.out.filter { it.isNotBlank() }
+    }
+
+    /**
+     * 读取文件内容为文本（ADB 模式替代 rootService.readText）
+     * 使用 cat 命令
+     * @param path 文件路径
+     * @return 文件内容
+     */
+    fun readText(path: String): String {
+        val result = execute("cat", path)
+        if (!result.isSuccess) return ""
+        return result.outString
+    }
+
+    /**
+     * 读取 JSON 文件并解析（ADB 模式替代 rootService.readJson）
+     * @param path JSON 文件路径
+     * @return JSON 字符串或 null
+     */
+    fun readJsonText(path: String): String? {
+        val result = execute("cat", path)
+        if (!result.isSuccess) return null
+        return result.outString.ifEmpty { null }
+    }
+
+    /**
+     * 写入文本到文件（ADB 模式替代 rootService.writeText）
+     * @param text 文本内容
+     * @param dst 目标路径
+     * @return 是否成功
+     */
+    fun writeText(text: String, dst: String): Boolean {
+        // 使用 echo + 重定向写入，注意转义
+        val result = execute("sh", "-c", "cat > '$dst' << 'HEREDOC_EOF'\n$text\nHEREDOC_EOF")
+        return result.isSuccess
+    }
+
+    /**
+     * 删除目录（递归）（ADB 模式替代 rootService.deleteRecursively）
+     * @param path 路径
+     * @return 是否成功
+     */
+    fun deleteRecursively(path: String): Boolean {
+        val result = execute("rm", "-rf", path)
+        return result.isSuccess
+    }
+
+    /**
+     * 重命名文件/目录（ADB 模式替代 rootService.renameTo）
+     * @param src 源路径
+     * @param dst 目标路径
+     * @return 是否成功
+     */
+    fun renameTo(src: String, dst: String): Boolean {
+        val result = execute("mv", src, dst)
+        return result.isSuccess
+    }
+
+    /**
+     * 计算文件 MD5（ADB 模式替代 rootService.calculateMD5）
+     * @param path 文件路径
+     * @return MD5 字符串或 null
+     */
+    fun calculateMD5(path: String): String? {
+        val result = execute("md5sum", path)
+        if (!result.isSuccess) return null
+        val line = result.out.firstOrNull() ?: return null
+        return line.split(Regex("\\s+")).firstOrNull()
+    }
+
+    /**
+     * 清理空目录（递归）（ADB 模式替代 rootService.clearEmptyDirectoriesRecursively）
+     * @param path 路径
+     */
+    fun clearEmptyDirectoriesRecursively(path: String) {
+        execute("find", path, "-type", "d", "-empty", "-delete")
+    }
+
+    /**
+     * 获取应用权限列表（ADB 模式替代 rootService.getPermissions）
+     * 使用 dumpsys package 获取运行时权限
+     * @param packageName 包名
+     * @return 权限名列表
+     */
+    fun getPermissions(packageName: String): List<String> {
+        val result = execute("dumpsys", "package", packageName)
+        if (!result.isSuccess) return emptyList()
+        val permissions = mutableListOf<String>()
+        var inRuntimePermissions = false
+        for (line in result.out) {
+            val trimmed = line.trim()
+            if (trimmed.contains("runtime permissions:")) {
+                inRuntimePermissions = true
+                continue
+            }
+            if (inRuntimePermissions) {
+                if (trimmed.startsWith("android.permission.") || trimmed.startsWith("com.")) {
+                    val permName = trimmed.substringBefore(":").trim()
+                    if (permName.isNotEmpty()) permissions.add(permName)
+                } else if (!trimmed.startsWith(" ") && trimmed.isNotEmpty()) {
+                    inRuntimePermissions = false
+                }
+            }
+        }
+        return permissions
+    }
 }
 
 data class AdbResult(
@@ -499,4 +709,19 @@ data class AdbResult(
 data class LsEntry(
     val name: String,
     val isDirectory: Boolean,
+)
+
+/**
+ * ADB 模式下获取的应用信息
+ * 用于替代 rootService.getPackageInfoAsUser 返回的 PackageInfo
+ */
+data class AdbPackageInfo(
+    val packageName: String,
+    val versionName: String,
+    val versionCode: Long,
+    val flags: Int,
+    val firstInstallTime: Long,
+    val lastUpdateTime: Long,
+    val uid: Int,
+    val enabled: Boolean,
 )
