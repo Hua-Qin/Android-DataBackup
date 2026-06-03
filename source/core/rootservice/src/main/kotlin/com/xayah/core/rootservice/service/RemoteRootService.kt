@@ -46,6 +46,7 @@ class RemoteRootService(private val context: Context) {
     private var mConnection: ServiceConnection? = null
     private var mutex = Mutex()
     private var retries = 0
+    private var rootAvailable: Boolean? = null
     private val intent by lazy {
         Intent().apply {
             component = ComponentName(context.packageName, RemoteRootService::class.java.name)
@@ -57,6 +58,22 @@ class RemoteRootService(private val context: Context) {
     var onFailure: (Throwable) -> Unit = {}
 
     private fun log(msg: () -> String) = LogUtil.log { "RemoteRootService" to msg() }
+
+    /**
+     * 检查 ROOT 是否可用。缓存结果避免重复检查。
+     * 如果 ROOT 不可用，bindService 会无限挂起，因此需要提前检查。
+     */
+    private suspend fun isRootAvailable(): Boolean {
+        if (rootAvailable != null) return rootAvailable!!
+        return try {
+            val result = com.topjohnwu.superuser.Shell.getShell().isRoot
+            rootAvailable = result
+            result
+        } catch (e: Exception) {
+            rootAvailable = false
+            false
+        }
+    }
 
     class RemoteRootService : RootService() {
         init {
@@ -132,6 +149,10 @@ class RemoteRootService(private val context: Context) {
         return tryOnScope(
             block = {
                 withMainContext {
+                    // 先检查 ROOT 是否可用，避免 bindService 无限挂起
+                    if (!isRootAvailable()) {
+                        throw RemoteException("ROOT is not available, please use ADB mode instead.")
+                    }
                     if (mService == null) {
                         val msg = "Service is null, trying to bind: $retries."
                         log { msg }
@@ -152,6 +173,10 @@ class RemoteRootService(private val context: Context) {
                     val msg = it.message
                     if (msg != null)
                         log { msg }
+                    // ROOT 不可用时不再重试绑定
+                    if (!isRootAvailable()) {
+                        throw RemoteException("ROOT is not available, please use ADB mode instead.")
+                    }
                     bindService()
                 }
             }

@@ -1,8 +1,11 @@
 package com.xayah.feature.main.directory
 
 import android.app.Activity
+import android.content.Context
 import androidx.compose.material3.ExperimentalMaterial3Api
 import com.xayah.core.data.repository.DirectoryRepository
+import com.xayah.core.datastore.readPermissionMode
+import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.StorageType
 import com.xayah.core.model.database.DirectoryEntity
 import com.xayah.core.rootservice.service.RemoteRootService
@@ -10,12 +13,16 @@ import com.xayah.core.ui.viewmodel.BaseViewModel
 import com.xayah.core.ui.viewmodel.IndexUiEffect
 import com.xayah.core.ui.viewmodel.UiIntent
 import com.xayah.core.ui.viewmodel.UiState
+import com.xayah.core.util.adb.AdbService
 import com.xayah.libpickyou.PickYouLauncher
+import com.xayah.libpickyou.parcelables.DirChildrenParcelable
 import com.xayah.libpickyou.ui.model.PermissionType
 import com.xayah.libpickyou.ui.model.PickerType
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
 data class IndexUiState(
@@ -34,6 +41,7 @@ sealed class IndexUiIntent : UiIntent {
 class IndexViewModel @Inject constructor(
     rootService: RemoteRootService,
     private val directoryRepo: DirectoryRepository,
+    @ApplicationContext private val context: Context,
 ) : BaseViewModel<IndexUiState, IndexUiIntent, IndexUiEffect>(IndexUiState(updating = true)) {
     init {
         rootService.onFailure = {
@@ -57,14 +65,35 @@ class IndexViewModel @Inject constructor(
 
             is IndexUiIntent.Add -> {
                 withMainContext {
-                    val context = intent.context
+                    val activity = intent.context
+                    val permissionMode = context.readPermissionMode().first()
+                    val isAdb = permissionMode == PermissionMode.ADB
+
                     PickYouLauncher(
                         checkPermission = true,
-                        title = context.getString(R.string.select_target_directory),
+                        title = activity.getString(R.string.select_target_directory),
                         pickerType = PickerType.DIRECTORY,
-                        permissionType = PermissionType.ROOT,
+                        permissionType = if (isAdb) PermissionType.NORMAL else PermissionType.ROOT,
+                        traverseBackend = if (isAdb) { pathString ->
+                            // ADB 模式下使用 AdbService 遍历目录
+                            val result = AdbService.listFilePaths(pathString)
+                            val children = DirChildrenParcelable()
+                            for (path in result) {
+                                val isDir = AdbService.exists(path) && AdbService.execute("test", "-d", path).isSuccess
+                                if (isDir) {
+                                    children.dirs.add(path)
+                                } else {
+                                    children.files.add(path)
+                                }
+                            }
+                            children
+                        } else null,
+                        mkdirsBackend = if (isAdb) { parent, child ->
+                            // ADB 模式下使用 AdbService 创建目录
+                            AdbService.mkdirs("$parent/$child")
+                        } else null,
                     ).apply {
-                        launch(context) { pathString ->
+                        launch(activity) { pathString ->
                             launchOnIO {
                                 directoryRepo.addDir(listOf(pathString))
                                 emitIntent(IndexUiIntent.Update)

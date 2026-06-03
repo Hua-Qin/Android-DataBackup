@@ -350,6 +350,79 @@ object AdbService {
     fun calculateSize(path: String): AdbResult {
         return execute("du", "-sb", path)
     }
+
+    // ========== ADB 模式下目录选择所需的文件操作 ==========
+
+    /**
+     * 列出指定路径下的子目录/文件路径（ADB 模式替代 rootService.listFilePaths）
+     * @param path 要列出的目录路径
+     * @param listFiles 是否包含文件
+     * @param listDirs 是否包含目录
+     * @return 路径列表
+     */
+    fun listFilePaths(path: String, listFiles: Boolean = true, listDirs: Boolean = true): List<String> {
+        val args = mutableListOf("ls")
+        if (listDirs && !listFiles) args.add("-d") // 只显示目录
+        if (!listDirs && listFiles) args.add("-p") // 只显示文件（非目录后加/）
+        args.add(path)
+        args.add("/") // ls path/ 确保列出内容
+        val result = execute(*args.toTypedArray())
+        if (!result.isSuccess) return emptyList()
+        return result.out.mapNotNull { line ->
+            val name = line.trim()
+            if (name.isNotEmpty() && !name.startsWith("total")) {
+                "$path/$name"
+            } else null
+        }
+    }
+
+    /**
+     * 读取文件系统状态信息（ADB 模式替代 rootService.readStatFs）
+     * 使用 df 命令获取可用空间和总空间
+     * @param path 路径
+     * @return Pair(availableBytes, totalBytes)
+     */
+    fun readStatFs(path: String): Pair<Long, Long> {
+        val result = execute("df", "-P", path)
+        if (!result.isSuccess) return Pair(0L, 0L)
+        // df -P 输出格式:
+        // Filesystem         1024-blocks     Used Available Capacity Mounted on
+        // /dev/fuse           244219904 83627584 160432352      35% /storage/emulated
+        val dataLine = result.out.lastOrNull { it.startsWith("/") } ?: return Pair(0L, 0L)
+        val parts = dataLine.split(Regex("\\s+"))
+        if (parts.size < 4) return Pair(0L, 0L)
+        val totalKb = parts[1].toLongOrNull() ?: 0L
+        val availableKb = parts[3].toLongOrNull() ?: 0L
+        return Pair(availableKb * 1024, totalKb * 1024)
+    }
+
+    /**
+     * 计算路径大小（ADB 模式替代 rootService.calculateSize）
+     * @param path 路径
+     * @return 字节数
+     */
+    fun calculateSizeLong(path: String): Long {
+        val result = execute("du", "-sb", path)
+        if (!result.isSuccess) return 0L
+        val line = result.out.firstOrNull() ?: return 0L
+        return line.split(Regex("\\s+")).firstOrNull()?.toLongOrNull() ?: 0L
+    }
+
+    /**
+     * 检查路径是否存在
+     */
+    fun exists(path: String): Boolean {
+        val result = execute("test", "-e", path)
+        return result.isSuccess
+    }
+
+    /**
+     * 创建目录（含父目录）
+     */
+    fun mkdirs(path: String): Boolean {
+        val result = execute("mkdir", "-p", path)
+        return result.isSuccess
+    }
 }
 
 data class AdbResult(
