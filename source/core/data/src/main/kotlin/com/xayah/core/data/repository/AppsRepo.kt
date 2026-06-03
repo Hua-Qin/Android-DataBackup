@@ -31,6 +31,7 @@ import com.xayah.core.model.DefaultPreserveId
 import com.xayah.core.model.OpType
 import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.SettingsData
+import kotlinx.coroutines.runBlocking
 import com.xayah.core.model.UserInfo
 import com.xayah.core.model.database.LabelAppCrossRefEntity
 import com.xayah.core.model.database.PackageDataStates
@@ -618,7 +619,7 @@ class AppsRepo @Inject constructor(
         val path = pathUtil.getLocalBackupAppsDir()
         val paths = if (adbMode) {
             // ADB 模式下使用 find 遍历文件树
-            AdbService.walkFileTree(path).map { PathParcelable(it.split("/")) }
+            AdbService.walkFileTree(path).map { PathParcelable(it) }
         } else {
             rootService.walkFileTree(path)
         }
@@ -634,7 +635,7 @@ class AppsRepo @Inject constructor(
                     }
                     if (adbMode && jsonText != null) {
                         // ADB 模式下：从 JSON 文本解析
-                        val p = GsonUtil().fromJson<PackageEntity>(jsonText, object : com.google.gson.reflect.TypeToken<PackageEntity>() {}.type)
+                        val p = com.google.gson.GsonBuilder().create().fromJson<PackageEntity>(jsonText, object : com.google.gson.reflect.TypeToken<PackageEntity>() {}.type)
                         p?.id = 0
                         p?.extraInfo?.activated = false
                         p?.indexInfo?.cloud = ""

@@ -222,6 +222,8 @@ object AdbService {
 
     /**
      * 获取所有用户列表
+     * 使用 pm list users 命令
+     * @return 用户ID列表
      */
     fun getUsers(): List<Int> {
         val result = execute("pm", "list", "users")
@@ -485,15 +487,6 @@ object AdbService {
     // ========== ADB 模式下应用列表初始化所需的操作 ==========
 
     /**
-     * 获取用户列表（ADB 模式替代 rootService.getUsers）
-     * 使用 pm list users 命令
-     * @return 用户ID列表
-     */
-    fun getUsers(): List<Int> {
-        return getUsersInternal()
-    }
-
-    /**
      * 获取已安装应用的包名列表（ADB 模式替代 rootService.getInstalledPackagesAsUser）
      * 使用 pm list packages 命令
      * @param userId 用户ID
@@ -560,19 +553,6 @@ object AdbService {
             uid = uid,
             enabled = enabled,
         )
-    }
-
-    /**
-     * 获取应用的 APK 路径列表（ADB 模式替代 rootService.getPackageSourceDir）
-     * @param packageName 包名
-     * @return APK 路径列表
-     */
-    fun getPackageSourceDir(packageName: String): List<String> {
-        val result = execute("pm", "path", packageName)
-        if (!result.isSuccess) return emptyList()
-        return result.out.mapNotNull { line ->
-            if (line.startsWith("package:")) line.substring("package:".length) else null
-        }
     }
 
     /**
