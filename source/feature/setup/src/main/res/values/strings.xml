@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="adb_permission">ADB permission</string>
+    <string name="adb_permission_desc">Backup and restore APKs only (requires Shizuku)</string>
+</resources>
