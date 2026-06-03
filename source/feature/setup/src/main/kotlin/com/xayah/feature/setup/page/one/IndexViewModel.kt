@@ -81,10 +81,29 @@ class IndexViewModel @Inject constructor(
                 mutex.withLock {
                     if (adbState.value == EnvState.Idle || adbState.value == EnvState.Failed) {
                         _adbState.value = EnvState.Processing
-                        _adbState.value = if (AdbService.isAvailable()) {
+                        // 遵循 Shizuku 官方权限申请流程：
+                        // 1. 先检查是否已有权限
+                        // 2. 如果 Binder 存活但无权限，请求权限
+                        // 3. 请求权限后通过 AdbService.permissionGranted 回调更新状态
+                        val available = AdbService.isAvailable()
+                        if (available) {
                             context.savePermissionMode(PermissionMode.ADB)
-                            EnvState.Succeed
-                        } else EnvState.Failed
+                            _adbState.value = EnvState.Succeed
+                        } else if (AdbService.isBinderAlive()) {
+                            // Binder 存活但权限未授予，请求权限
+                            AdbService.requestPermission()
+                            // 等待权限回调，短暂延迟后再次检查
+                            kotlinx.coroutines.delay(1000)
+                            if (AdbService.isAvailable()) {
+                                context.savePermissionMode(PermissionMode.ADB)
+                                _adbState.value = EnvState.Succeed
+                            } else {
+                                _adbState.value = EnvState.Failed
+                            }
+                        } else {
+                            // Shizuku 未启动或未安装
+                            _adbState.value = EnvState.Failed
+                        }
                     }
                 }
             }

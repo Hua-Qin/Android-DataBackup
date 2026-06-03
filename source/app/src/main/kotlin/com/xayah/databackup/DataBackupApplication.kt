@@ -3,9 +3,9 @@ package com.xayah.databackup
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.xayah.core.util.adb.AdbService
 import dagger.hilt.android.HiltAndroidApp
 import org.bouncycastle.jce.provider.BouncyCastleProvider
-import rikka.shizuku.Shizuku
 import java.security.Security
 import javax.inject.Inject
 
@@ -15,23 +15,17 @@ class DataBackupApplication : Application(), Configuration.Provider {
         lateinit var application: Application
     }
 
-    private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
-        // Shizuku permission result handled by AdbService
-    }
-
     override fun onCreate() {
         super.onCreate()
         application = this
         setupBouncyCastle()
-        setupShizuku()
+        // 初始化 Shizuku Binder 生命周期监听和权限监听
+        AdbService.init()
     }
 
-    private fun setupShizuku() {
-        try {
-            Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
-        } catch (e: Exception) {
-            // Shizuku not available, skip
-        }
+    override fun onTerminate() {
+        super.onTerminate()
+        AdbService.destroy()
     }
 
     // Ref: https://github.com/hyperledger/web3j/issues/915#issuecomment-483145928

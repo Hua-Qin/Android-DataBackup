@@ -2,6 +2,9 @@ package com.xayah.core.util.adb
 
 import android.content.pm.PackageManager
 import android.os.ParcelFileDescriptor
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import rikka.shizuku.Shizuku
 import moe.shizuku.server.IRemoteProcess
 import moe.shizuku.server.IShizukuService
@@ -11,13 +14,76 @@ import java.io.InputStreamReader
 /**
  * ADB 服务封装类，通过 Shizuku 提供的 shell 权限执行命令。
  * 仅支持 ADB 权限范围内的安全操作（APK 备份/恢复、应用管理、权限管理等）。
+ *
+ * 遵循 Shizuku 官方开发文档：
+ * - 使用 ShizukuProvider 获取 Binder（需在 AndroidManifest.xml 中声明）
+ * - 使用 Shizuku.checkSelfPermission() / requestPermission() 管理权限
+ * - 使用 addBinderReceivedListener / addBinderDeadListener 管理 Binder 生命周期
+ * - 通过 IShizukuService.newProcess() 执行 shell 命令（newProcess 将在 API 14 移除，后续需迁移至 UserService）
  */
 object AdbService {
 
-    private fun getService(): IShizukuService {
-        val binder = Shizuku.getBinder()
-            ?: throw IllegalStateException("Shizuku binder not available")
-        return IShizukuService.Stub.asInterface(binder)
+    private const val SHIZUKU_REQUEST_CODE = 101
+
+    private val _binderAlive = MutableStateFlow(false)
+    val binderAlive: StateFlow<Boolean> = _binderAlive.asStateFlow()
+
+    private val _permissionGranted = MutableStateFlow(false)
+    val permissionGranted: StateFlow<Boolean> = _permissionGranted.asStateFlow()
+
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        _binderAlive.value = true
+        updatePermissionState()
+    }
+
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        _binderAlive.value = false
+        _permissionGranted.value = false
+    }
+
+    private val requestPermissionResultListener =
+        Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+            _permissionGranted.value = grantResult == PackageManager.PERMISSION_GRANTED
+        }
+
+    /**
+     * 初始化 Shizuku 监听器，应在 Application.onCreate() 中调用
+     */
+    fun init() {
+        try {
+            Shizuku.addBinderReceivedListener(binderReceivedListener)
+            Shizuku.addBinderDeadListener(binderDeadListener)
+            Shizuku.addRequestPermissionResultListener(requestPermissionResultListener)
+            // 如果 Binder 已经存在，立即更新状态
+            if (Shizuku.pingBinder()) {
+                _binderAlive.value = true
+                updatePermissionState()
+            }
+        } catch (e: Exception) {
+            // Shizuku 未安装或不可用
+        }
+    }
+
+    /**
+     * 销毁 Shizuku 监听器，应在 Application.onTerminate() 中调用
+     */
+    fun destroy() {
+        try {
+            Shizuku.removeBinderReceivedListener(binderReceivedListener)
+            Shizuku.removeBinderDeadListener(binderDeadListener)
+            Shizuku.removeRequestPermissionResultListener(requestPermissionResultListener)
+        } catch (e: Exception) {
+            // 忽略
+        }
+    }
+
+    private fun updatePermissionState() {
+        try {
+            _permissionGranted.value =
+                Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        } catch (e: Exception) {
+            _permissionGranted.value = false
+        }
     }
 
     /**
@@ -25,7 +91,19 @@ object AdbService {
      */
     fun isAvailable(): Boolean {
         return try {
-            Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            Shizuku.pingBinder() &&
+                Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 检查 Shizuku Binder 是否存活（权限可能未授予）
+     */
+    fun isBinderAlive(): Boolean {
+        return try {
+            Shizuku.pingBinder()
         } catch (e: Exception) {
             false
         }
@@ -33,21 +111,67 @@ object AdbService {
 
     /**
      * 请求 Shizuku 权限
+     * 遵循官方文档的权限申请流程：
+     * 1. 检查 checkSelfPermission
+     * 2. 检查 shouldShowRequestPermissionRationale
+     * 3. 调用 requestPermission
      */
-    fun requestPermission(context: android.content.Context) {
+    fun requestPermission() {
         try {
-            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                Shizuku.requestPermission(0)
+            if (Shizuku.isPreV11()) {
+                // Pre-v11 不支持
+                return
             }
+            when {
+                Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED -> {
+                    _permissionGranted.value = true
+                }
+                Shizuku.shouldShowRequestPermissionRationale() -> {
+                    // 用户选择了"拒绝且不再询问"，需要引导用户手动授权
+                    // 此处仅更新状态，UI 层应处理引导逻辑
+                    _permissionGranted.value = false
+                }
+                else -> {
+                    Shizuku.requestPermission(SHIZUKU_REQUEST_CODE)
+                }
+            }
+        } catch (e: IllegalStateException) {
+            // Binder 未就绪，无法请求权限
         } catch (e: Exception) {
-            // Shizuku not installed or not running
+            // Shizuku 未安装或不可用
         }
     }
 
     /**
+     * 获取 Shizuku 服务是否以 ROOT 运行（uid=0），ADB 则为 uid=2000
+     */
+    fun isRootMode(): Boolean {
+        return try {
+            Shizuku.getUid() == 0
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 获取 IShizukuService 实例
+     * 通过 Shizuku.getBinder() 获取 Binder 并转换为 AIDL 接口
+     */
+    private fun getService(): IShizukuService {
+        val binder = Shizuku.getBinder()
+            ?: throw IllegalStateException("Shizuku binder not available")
+        return IShizukuService.Stub.asInterface(binder)
+    }
+
+    /**
      * 通过 Shizuku 执行 shell 命令
-     * @param command 要执行的命令
-     * @return 命令输出（stdout）
+     * 使用 IShizukuService.newProcess() 执行命令
+     *
+     * 注意：newProcess 在 API 13 中已标记为 private，计划在 API 14 移除。
+     * 后续需迁移至 UserService 方式执行命令。
+     *
+     * @param command 要执行的命令参数
+     * @return 命令执行结果
      */
     fun execute(vararg command: String): AdbResult {
         return try {
@@ -79,8 +203,6 @@ object AdbService {
 
     /**
      * 获取应用的 APK 路径
-     * @param packageName 应用包名
-     * @return APK 路径列表
      */
     fun getPackageSourceDir(packageName: String): List<String> {
         val result = execute("pm", "path", packageName)
@@ -92,8 +214,6 @@ object AdbService {
 
     /**
      * 检查应用是否已安装
-     * @param packageName 应用包名
-     * @param userId 用户 ID
      */
     fun queryInstalled(packageName: String, userId: Int = 0): Boolean {
         val result = execute("pm", "list", "packages", "--user", userId.toString(), packageName)
@@ -102,7 +222,6 @@ object AdbService {
 
     /**
      * 获取所有用户列表
-     * @return 用户 ID 列表
      */
     fun getUsers(): List<Int> {
         val result = execute("pm", "list", "users")
@@ -115,8 +234,6 @@ object AdbService {
 
     /**
      * 安装 APK
-     * @param userId 用户 ID
-     * @param src APK 文件路径
      */
     fun installApk(userId: Int, src: String): AdbResult {
         return execute("pm", "install", "--user", userId.toString(), "-r", "-t", src)
