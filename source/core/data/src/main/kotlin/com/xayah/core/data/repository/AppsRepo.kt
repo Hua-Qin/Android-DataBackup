@@ -455,7 +455,7 @@ class AppsRepo @Inject constructor(
 
                 updateEntity.extraInfo.firstUpdated = true
                 updateEntity.extraInfo.uid = adbInfo.uid
-                updateEntity.extraInfo.permissions = AdbService.getPermissions(pkg.packageName)
+                updateEntity.extraInfo.permissions = AdbService.getPermissions(pkg.packageName).map { com.xayah.core.model.database.PackagePermission(name = it) }
                 updateEntity.extraInfo.hasKeystore = false // ADB 模式下无法检查 keystore
                 updateEntity.extraInfo.ssaid = "" // ADB 模式下无法获取 SSAID
                 updateEntity.extraInfo.enabled = adbInfo.enabled
