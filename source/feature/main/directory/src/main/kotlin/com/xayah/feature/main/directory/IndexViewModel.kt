@@ -76,17 +76,17 @@ class IndexViewModel @Inject constructor(
                         permissionType = if (isAdb) PermissionType.NORMAL else PermissionType.ROOT,
                         traverseBackend = if (isAdb) { pathString ->
                             // ADB 模式下使用 AdbService 遍历目录
-                            val result = AdbService.listFilePaths(pathString)
-                            val children = DirChildrenParcelable()
-                            for (path in result) {
-                                val isDir = AdbService.exists(path) && AdbService.execute("test", "-d", path).isSuccess
-                                if (isDir) {
-                                    children.dirs.add(path)
+                            val paths = AdbService.listFilePaths(pathString)
+                            val files = mutableListOf<String>()
+                            val directories = mutableListOf<String>()
+                            for (path in paths) {
+                                if (AdbService.execute("test", "-d", path).isSuccess) {
+                                    directories.add(path)
                                 } else {
-                                    children.files.add(path)
+                                    files.add(path)
                                 }
                             }
-                            children
+                            DirChildrenParcelable(files = files, directories = directories)
                         } else null,
                         mkdirsBackend = if (isAdb) { parent, child ->
                             // ADB 模式下使用 AdbService 创建目录
