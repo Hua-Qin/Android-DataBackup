@@ -4,11 +4,13 @@ import android.annotation.SuppressLint
 import com.xayah.core.common.util.toLineString
 import com.xayah.core.datastore.readBackupConfigs
 import com.xayah.core.datastore.readBackupItself
+import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.datastore.readResetBackupList
 import com.xayah.core.datastore.saveLastBackupTime
 import com.xayah.core.model.DataType
 import com.xayah.core.model.OpType
 import com.xayah.core.model.OperationState
+import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.ProcessingInfoType
 import com.xayah.core.model.ProcessingType
 import com.xayah.core.model.TaskType
@@ -23,6 +25,7 @@ import com.xayah.core.service.util.MediumBackupUtil
 import com.xayah.core.util.DateUtil
 import com.xayah.core.util.NotificationUtil
 import com.xayah.core.util.PathUtil
+import com.xayah.core.util.adb.AdbService
 import kotlinx.coroutines.flow.first
 
 internal abstract class AbstractBackupService : AbstractMediumService() {
@@ -94,7 +97,8 @@ internal abstract class AbstractBackupService : AbstractMediumService() {
         when (entity.infoType) {
             ProcessingInfoType.NECESSARY_PREPARATIONS -> {
                 log { "Trying to create: $mFilesDir." }
-                mRootService.mkdirs(mFilesDir)
+                val adbMode = mContext.readPermissionMode().first() == PermissionMode.ADB
+                if (adbMode) AdbService.mkdirs(mFilesDir) else mRootService.mkdirs(mFilesDir)
                 val isSuccess = runCatchingOnService { onTargetDirsCreated() }
                 entity.update(progress = 1f, state = if (isSuccess) OperationState.DONE else OperationState.ERROR)
             }
@@ -124,7 +128,8 @@ internal abstract class AbstractBackupService : AbstractMediumService() {
                 val m = media.mediaEntity
                 val dstDir = "${mFilesDir}/${m.archivesRelativeDir}"
                 var restoreEntity = mMediaDao.query(OpType.RESTORE, m.preserveId, m.name, m.indexInfo.compressionType, mTaskEntity.cloud, mTaskEntity.backupDir)
-                mRootService.mkdirs(dstDir)
+                val adbMode = mContext.readPermissionMode().first() == PermissionMode.ADB
+                if (adbMode) AdbService.mkdirs(dstDir) else mRootService.mkdirs(dstDir)
                 if (onFileDirCreated(archivesRelativeDir = m.archivesRelativeDir)) {
                     backup(m = m, r = restoreEntity, t = media, dstDir = dstDir)
 
@@ -138,7 +143,12 @@ internal abstract class AbstractBackupService : AbstractMediumService() {
                             extraInfo = m.extraInfo.copy(existed = true, activated = false)
                         )
                         val configDst = PathUtil.getMediaRestoreConfigDst(dstDir = dstDir)
-                        mRootService.writeJson(data = restoreEntity, dst = configDst)
+                        if (adbMode) {
+                            val json = com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(restoreEntity)
+                            AdbService.writeText(json, configDst)
+                        } else {
+                            mRootService.writeJson(data = restoreEntity, dst = configDst)
+                        }
                         onConfigSaved(path = configDst, archivesRelativeDir = m.archivesRelativeDir)
                         mMediaDao.upsert(restoreEntity)
                         mMediaDao.upsert(m)

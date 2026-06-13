@@ -2,15 +2,19 @@ package com.xayah.core.service.packages
 
 import com.xayah.core.data.repository.PackageRepository
 import com.xayah.core.database.dao.PackageDao
+import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.model.DataType
 import com.xayah.core.model.KillAppOption
 import com.xayah.core.model.OperationState
+import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.database.PackageEntity
 import com.xayah.core.model.database.TaskDetailPackageEntity
 import com.xayah.core.model.util.set
 import com.xayah.core.service.AbstractProcessingService
 import com.xayah.core.service.util.PackagesBackupUtil
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.command.BaseUtil
+import kotlinx.coroutines.flow.first
 
 internal abstract class AbstractPackagesService : AbstractProcessingService() {
     protected val mPkgEntities: MutableList<TaskDetailPackageEntity> = mutableListOf()
@@ -50,7 +54,12 @@ internal abstract class AbstractPackagesService : AbstractProcessingService() {
 
             KillAppOption.OPTION_II -> {
                 log { "Trying to kill ${pkg.packageEntity.packageName}." }
-                mRootService.forceStopPackageAsUser(pkg.packageEntity.packageName, pkg.packageEntity.userId)
+                val adbMode = mContext.readPermissionMode().first() == PermissionMode.ADB
+                if (adbMode) {
+                    AdbService.forceStopPackage(pkg.packageEntity.packageName, pkg.packageEntity.userId)
+                } else {
+                    mRootService.forceStopPackageAsUser(pkg.packageEntity.packageName, pkg.packageEntity.userId)
+                }
             }
         }
     }

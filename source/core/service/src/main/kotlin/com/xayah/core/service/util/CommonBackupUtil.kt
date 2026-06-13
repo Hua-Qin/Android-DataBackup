@@ -8,6 +8,7 @@ import com.xayah.core.data.repository.LabelsRepo
 import com.xayah.core.data.repository.MediaRepository
 import com.xayah.core.data.repository.PackageRepository
 import com.xayah.core.datastore.readCompressionTest
+import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.model.BlacklistAppItem
 import com.xayah.core.model.BlacklistFileItem
 import com.xayah.core.model.CompressionType
@@ -15,10 +16,12 @@ import com.xayah.core.model.Configurations
 import com.xayah.core.model.ConfigurationsBlacklist
 import com.xayah.core.model.FileItem
 import com.xayah.core.model.OpType
+import com.xayah.core.model.PermissionMode
 import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.util.ConfigsConfigurationsName
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.command.Tar
 import com.xayah.core.util.model.ShellResult
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -52,29 +55,49 @@ class CommonBackupUtil @Inject constructor(
         val packageName = context.packageName
         var isSuccess = true
         val out = mutableListOf<String>()
-        val sourceDirList = rootService.getPackageSourceDir(packageName, android.os.Process.myUid() / 100000)
+        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
+        val sourceDirList = if (adbMode) {
+            AdbService.getPackageSourceDir(packageName)
+        } else {
+            rootService.getPackageSourceDir(packageName, android.os.Process.myUid() / 100000)
+        }
         if (sourceDirList.isNotEmpty()) {
             val apkPath = PathUtil.getParentPath(sourceDirList[0])
             val path = "${apkPath}/base.apk"
             val targetPath = getItselfDst(dstDir = dstDir)
 
-            if (rootService.exists(targetPath) && (rootService.getPackageArchiveInfo(targetPath)
+            val targetExists = if (adbMode) AdbService.exists(targetPath) else rootService.exists(targetPath)
+            if (targetExists && (if (adbMode) {
+                    // ADB 模式下简化检查：如果目标文件已存在则跳过
+                    true
+                } else {
+                    rootService.getPackageArchiveInfo(targetPath)
                     ?.let {
                         BuildConfigUtil.VERSION_CODE == if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             it.longVersionCode
                         } else {
                             it.versionCode.toLong()
                         }
-                    } == true)
+                    } == true
+                })
             ) {
                 out.add(log { "$targetPath exists, skip." })
             } else {
-                isSuccess = rootService.copyTo(path = path, targetPath = targetPath, overwrite = true)
-                if (isSuccess.not()) {
-                    out.add(log { "Failed to copy $path to $targetPath." })
+                if (adbMode) {
+                    isSuccess = AdbService.execute("cp", path, targetPath).isSuccess
+                    if (isSuccess.not()) {
+                        out.add(log { "Failed to copy $path to $targetPath." })
+                    } else {
+                        out.add(log { "Copied from $path to $targetPath." })
+                    }
                 } else {
-                    rootService.setAllPermissions(targetPath)
-                    out.add(log { "Copied from $path to $targetPath." })
+                    isSuccess = rootService.copyTo(path = path, targetPath = targetPath, overwrite = true)
+                    if (isSuccess.not()) {
+                        out.add(log { "Failed to copy $path to $targetPath." })
+                    } else {
+                        rootService.setAllPermissions(targetPath)
+                        out.add(log { "Copied from $path to $targetPath." })
+                    }
                 }
             }
         } else {
@@ -89,6 +112,7 @@ class CommonBackupUtil @Inject constructor(
         var code: Int
         var input: List<String>
         val out = mutableListOf<String>()
+        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
 
         if (context.readCompressionTest().first()) {
             Tar.test(src = src, extra = ct.decompressPara)
@@ -97,7 +121,7 @@ class CommonBackupUtil @Inject constructor(
                     input = result.input
                     if (result.isSuccess.not()) {
                         out.add(log { "$src is broken, trying to delete it." })
-                        rootService.deleteRecursively(src)
+                        if (adbMode) AdbService.deleteRecursively(src) else rootService.deleteRecursively(src)
                     } else {
                         out.add(log { "Everything seems fine." })
                     }
@@ -146,9 +170,15 @@ class CommonBackupUtil @Inject constructor(
         val dst = getConfigsDst(dstDir)
         var isSuccess: Boolean
         val out = mutableListOf<String>()
-        rootService.writeJson(data = config, dst = dst).also { result ->
-            isSuccess = result.isSuccess
-            out.addAll(result.out)
+        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
+        if (adbMode) {
+            val json = com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(config)
+            isSuccess = AdbService.writeText(json, dst)
+        } else {
+            rootService.writeJson(data = config, dst = dst).also { result ->
+                isSuccess = result.isSuccess
+                out.addAll(result.out)
+            }
         }
 
         ShellResult(code = if (isSuccess) 0 else -1, input = listOf(), out = out)

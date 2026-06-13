@@ -5,8 +5,10 @@ import com.xayah.core.data.repository.MediaRepository
 import com.xayah.core.data.repository.TaskRepository
 import com.xayah.core.database.dao.MediaDao
 import com.xayah.core.database.dao.TaskDao
+import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.model.OpType
 import com.xayah.core.model.OperationState
+import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.TaskType
 import com.xayah.core.model.database.CloudEntity
 import com.xayah.core.model.database.MediaEntity
@@ -18,9 +20,11 @@ import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.util.CommonBackupUtil
 import com.xayah.core.service.util.MediumBackupUtil
 import com.xayah.core.util.PathUtil
+import com.xayah.core.util.adb.AdbService
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.coroutines.coroutineContext
@@ -131,7 +135,8 @@ internal class BackupServiceCloudImpl @Inject constructor() : AbstractBackupServ
     }
 
     override suspend fun clear() {
-        mRootService.deleteRecursively(mRootDir)
+        val adbMode = mContext.readPermissionMode().first() == PermissionMode.ADB
+        if (adbMode) AdbService.deleteRecursively(mRootDir) else mRootService.deleteRecursively(mRootDir)
         mClient.disconnect()
     }
 

@@ -13,10 +13,12 @@ import com.xayah.core.data.repository.TaskRepository
 import com.xayah.core.database.dao.TaskDao
 import com.xayah.core.datastore.ConstantUtil.DEFAULT_IDLE_TIMEOUT
 import com.xayah.core.datastore.readAutoScreenOff
+import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.datastore.readScreenOffTimeout
 import com.xayah.core.datastore.saveScreenOffCountDown
 import com.xayah.core.datastore.saveScreenOffTimeout
 import com.xayah.core.model.OperationState
+import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.database.ProcessingInfoEntity
 import com.xayah.core.model.database.TaskEntity
 import com.xayah.core.model.util.set
@@ -27,6 +29,7 @@ import com.xayah.core.util.DateUtil
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.NotificationUtil
 import com.xayah.core.util.PathUtil
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.withLog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -156,7 +159,14 @@ internal abstract class AbstractProcessingService : Service() {
             beforePreprocessing()
 
             if (mContext.readAutoScreenOff().first()) {
-                mContext.saveScreenOffTimeout(mRootService.getScreenOffTimeout())
+                val adbMode = mContext.readPermissionMode().first() == PermissionMode.ADB
+                if (adbMode) {
+                    val result = AdbService.getSettings("system", "screen_off_timeout")
+                    val timeout = result.outString.trim().toIntOrNull() ?: DEFAULT_IDLE_TIMEOUT
+                    mContext.saveScreenOffTimeout(timeout)
+                } else {
+                    mContext.saveScreenOffTimeout(mRootService.getScreenOffTimeout())
+                }
                 mContext.saveScreenOffCountDown(3)
             }
 
@@ -194,9 +204,16 @@ internal abstract class AbstractProcessingService : Service() {
                 mTaskEntity.update(postProcessingIndex = mTaskEntity.postProcessingIndex + 1)
             }
 
-            mRootService.setScreenOffTimeout(mContext.readScreenOffTimeout().first())
+            val adbMode = mContext.readPermissionMode().first() == PermissionMode.ADB
+            if (adbMode) {
+                AdbService.putSettings("system", "screen_off_timeout", mContext.readScreenOffTimeout().first().toString())
+            } else {
+                mRootService.setScreenOffTimeout(mContext.readScreenOffTimeout().first())
+            }
             mContext.saveScreenOffTimeout(DEFAULT_IDLE_TIMEOUT)
-            mRootService.setDisplayPowerMode(SurfaceControlHidden.POWER_MODE_NORMAL)
+            if (!adbMode) {
+                mRootService.setDisplayPowerMode(SurfaceControlHidden.POWER_MODE_NORMAL)
+            }
 
             mEndTimestamp = DateUtil.getTimestamp()
             afterPostProcessing()

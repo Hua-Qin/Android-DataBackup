@@ -8,9 +8,11 @@ import com.xayah.core.data.repository.PackageRepository
 import com.xayah.core.data.util.srcDir
 import com.xayah.core.database.dao.TaskDao
 import com.xayah.core.datastore.readCleanRestoring
+import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.datastore.readSelectionType
 import com.xayah.core.model.DataType
 import com.xayah.core.model.OperationState
+import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.SelectionType
 import com.xayah.core.model.database.PackageEntity
 import com.xayah.core.model.database.TaskDetailPackageEntity
@@ -20,6 +22,7 @@ import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
 import com.xayah.core.util.SymbolUtil
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.command.Appops
 import com.xayah.core.util.command.Pm
 import com.xayah.core.util.command.SELinux
@@ -165,73 +168,121 @@ class PackagesRestoreUtil @Inject constructor(
         val src = packageRepository.getArchiveDst(dstDir = srcDir, dataType = dataType, ct = ct)
         var isSuccess = true
         val out = mutableListOf<String>()
+        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
 
         if (p.getDataSelected(dataType).not()) {
             t.updateInfo(dataType = dataType, state = OperationState.SKIP)
         } else {
             // Return if the archive doesn't exist.
-            if (rootService.exists(src)) {
-                val sizeBytes = rootService.calculateSize(src)
+            val srcExists = if (adbMode) AdbService.exists(src) else rootService.exists(src)
+            if (srcExists) {
+                val sizeBytes = if (adbMode) AdbService.calculateSizeLong(src) else rootService.calculateSize(src)
                 t.updateInfo(dataType = dataType, state = OperationState.PROCESSING, bytes = sizeBytes)
                 // Decompress apk archive
                 val tmpApkPath = pathUtil.getTmpApkPath(packageName = packageName)
-                rootService.deleteRecursively(tmpApkPath)
-                rootService.mkdirs(tmpApkPath)
+                if (adbMode) {
+                    AdbService.deleteRecursively(tmpApkPath)
+                    AdbService.mkdirs(tmpApkPath)
+                } else {
+                    rootService.deleteRecursively(tmpApkPath)
+                    rootService.mkdirs(tmpApkPath)
+                }
                 Tar.decompress(src = src, dst = tmpApkPath, extra = ct.decompressPara).also { result ->
                     isSuccess = result.isSuccess
                     out.addAll(result.out)
                 }
 
                 // Install apks
-                rootService.listFilePaths(tmpApkPath).also { apksPath ->
-                    when (apksPath.size) {
+                val apksPath = if (adbMode) AdbService.listFilePaths(tmpApkPath) else rootService.listFilePaths(tmpApkPath)
+                apksPath.also { apks ->
+                    when (apks.size) {
                         0 -> {
                             isSuccess = false
                             out.add(log { "$tmpApkPath is empty." })
                         }
 
                         1 -> {
-                            Pm.install(userId = userId, src = apksPath.first()).also { result ->
-                                isSuccess = isSuccess && result.isSuccess
-                                out.addAll(result.out)
-                            }
-                        }
-
-                        else -> {
-                            var pmSession = ""
-                            Pm.Install.create(userId = userId).also { result ->
-                                if (result.isSuccess) pmSession = result.outString
-                            }
-                            if (pmSession.isNotEmpty()) {
-                                out.add(log { "Install session: $pmSession." })
-
+                            if (adbMode) {
+                                AdbService.installApk(userId, apks.first()).also { result ->
+                                    isSuccess = isSuccess && result.isSuccess
+                                    if (!result.isSuccess) out.add(log { "Failed to install: ${apks.first()}" })
+                                }
                             } else {
-                                isSuccess = false
-                                out.add(log { "Failed to get install session." })
-                            }
-
-                            apksPath.forEach { apkPath ->
-                                Pm.Install.write(session = pmSession, srcName = PathUtil.getFileName(apkPath), src = apkPath).also { result ->
+                                Pm.install(userId = userId, src = apks.first()).also { result ->
                                     isSuccess = isSuccess && result.isSuccess
                                     out.addAll(result.out)
                                 }
                             }
+                        }
 
-                            Pm.Install.commit(pmSession).also { result ->
-                                isSuccess = isSuccess && result.isSuccess
-                                out.addAll(result.out)
+                        else -> {
+                            if (adbMode) {
+                                // ADB 模式下使用 stream install
+                                val createResult = AdbService.installCreate(userId)
+                                val sessionId = createResult.outString.trim()
+                                if (createResult.isSuccess && sessionId.isNotEmpty()) {
+                                    out.add(log { "Install session: $sessionId." })
+                                    var allWritten = true
+                                    apks.forEach { apkPath ->
+                                        val fileName = PathUtil.getFileName(apkPath)
+                                        val writeResult = AdbService.installWrite(sessionId, fileName, apkPath)
+                                        if (!writeResult.isSuccess) {
+                                            allWritten = false
+                                            out.add(log { "Failed to write: $apkPath" })
+                                        }
+                                    }
+                                    if (allWritten) {
+                                        val commitResult = AdbService.installCommit(sessionId)
+                                        if (!commitResult.isSuccess) {
+                                            isSuccess = false
+                                            out.add(log { "Failed to commit install session." })
+                                        }
+                                    } else {
+                                        isSuccess = false
+                                    }
+                                } else {
+                                    isSuccess = false
+                                    out.add(log { "Failed to get install session." })
+                                }
+                            } else {
+                                var pmSession = ""
+                                Pm.Install.create(userId = userId).also { result ->
+                                    if (result.isSuccess) pmSession = result.outString
+                                }
+                                if (pmSession.isNotEmpty()) {
+                                    out.add(log { "Install session: $pmSession." })
+
+                                } else {
+                                    isSuccess = false
+                                    out.add(log { "Failed to get install session." })
+                                }
+
+                                apks.forEach { apkPath ->
+                                    Pm.Install.write(session = pmSession, srcName = PathUtil.getFileName(apkPath), src = apkPath).also { result ->
+                                        isSuccess = isSuccess && result.isSuccess
+                                        out.addAll(result.out)
+                                    }
+                                }
+
+                                Pm.Install.commit(pmSession).also { result ->
+                                    isSuccess = isSuccess && result.isSuccess
+                                    out.addAll(result.out)
+                                }
                             }
                         }
                     }
                 }
-                rootService.deleteRecursively(tmpApkPath)
+                if (adbMode) AdbService.deleteRecursively(tmpApkPath) else rootService.deleteRecursively(tmpApkPath)
 
                 // Check the installation again.
-                rootService.queryInstalled(packageName = packageName, userId = userId).also {
-                    if (it.not()) {
-                        isSuccess = false
-                        log { "Not installed: $packageName." }
-                    }
+                val installed = if (adbMode) {
+                    AdbService.getPackageInfo(packageName) != null
+                } else {
+                    rootService.queryInstalled(packageName = packageName, userId = userId)
+                }
+                if (!installed) {
+                    isSuccess = false
+                    log { "Not installed: $packageName." }
                 }
             } else {
                 isSuccess = false
@@ -254,13 +305,19 @@ class PackagesRestoreUtil @Inject constructor(
         val src = packageRepository.getArchiveDst(dstDir = srcDir, dataType = dataType, ct = ct)
         val dstDir = packageRepository.getDataSrcDir(dataType, userId)
         val dst = packageRepository.getDataSrc(dstDir, packageName)
-        val uid = rootService.getPackageUid(packageName = packageName, userId = userId)
+        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
         var isSuccess = true
         val out = mutableListOf<String>()
 
         if (p.getDataSelected(dataType).not()) {
             t.updateInfo(dataType = dataType, state = OperationState.SKIP)
+        } else if (adbMode) {
+            // ADB 模式下不支持用户数据恢复
+            isSuccess = false
+            out.add(log { "User data restore is not supported in ADB mode." })
+            t.updateInfo(dataType = dataType, state = OperationState.ERROR, log = out.toLineString())
         } else {
+            val uid = rootService.getPackageUid(packageName = packageName, userId = userId)
             if (uid == -1) {
                 isSuccess = false
                 out.add(log { "Failed to get uid of $packageName." })
@@ -362,31 +419,56 @@ class PackagesRestoreUtil @Inject constructor(
         log { "Restoring permissions..." }
 
         val packageName = p.packageName
-        val uid = rootService.getPackageUid(packageName = packageName, userId = userId)
-        val user = rootService.getUserHandle(userId)
+        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
         val permissions = p.extraInfo.permissions
 
         if (p.permissionSelected) {
-            if (uid != -1) {
+            if (adbMode) {
+                // ADB 模式下使用 AdbService 授予/撤销权限
                 Appops.reset(userId = userId, packageName = packageName)
                 log { "Permissions size: ${permissions.size}..." }
+                val uid = AdbService.getPackageInfo(packageName)?.uid ?: -1
                 permissions.forEach {
                     log { "Permission name: ${it.name}, isGranted: ${it.isGranted}, op: ${it.op}, mode: ${it.mode}" }
                     runCatching {
                         if (it.isGranted) {
-                            rootService.grantRuntimePermission(packageName, it.name, user!!)
+                            AdbService.grantPermission(packageName, it.name, userId)
                         } else {
-                            rootService.revokeRuntimePermission(packageName, it.name, user!!)
+                            AdbService.revokePermission(packageName, it.name, userId)
                         }
                         if (it.op != AppOpsManagerHidden.OP_NONE) {
                             it.mode?.also { mode ->
-                                rootService.setOpsMode(it.op, uid, packageName, mode)
+                                if (uid != -1) {
+                                    AdbService.setAppOpsMode(uid, packageName, it.op.toString(), mode.toString())
+                                }
                             }
                         }
                     }
                 }
             } else {
-                log { "Failed to get uid of $packageName." }
+                val uid = rootService.getPackageUid(packageName = packageName, userId = userId)
+                val user = rootService.getUserHandle(userId)
+                if (uid != -1) {
+                    Appops.reset(userId = userId, packageName = packageName)
+                    log { "Permissions size: ${permissions.size}..." }
+                    permissions.forEach {
+                        log { "Permission name: ${it.name}, isGranted: ${it.isGranted}, op: ${it.op}, mode: ${it.mode}" }
+                        runCatching {
+                            if (it.isGranted) {
+                                rootService.grantRuntimePermission(packageName, it.name, user!!)
+                            } else {
+                                rootService.revokeRuntimePermission(packageName, it.name, user!!)
+                            }
+                            if (it.op != AppOpsManagerHidden.OP_NONE) {
+                                it.mode?.also { mode ->
+                                    rootService.setOpsMode(it.op, uid, packageName, mode)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    log { "Failed to get uid of $packageName." }
+                }
             }
         } else {
             log { "Skip." }
@@ -397,19 +479,25 @@ class PackagesRestoreUtil @Inject constructor(
         log { "Restoring ssaid..." }
 
         val packageName = p.packageName
-        val uid = rootService.getPackageUid(packageName = packageName, userId = userId)
         val ssaid = p.extraInfo.ssaid
+        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
 
         if (p.ssaidSelected) {
-            if (uid != -1) {
-                if (ssaid.isNotEmpty()) {
-                    log { "Ssaid: $ssaid" }
-                    rootService.setPackageSsaidAsUser(packageName, uid, userId, ssaid)
-                } else {
-                    log { "Ssaid is empty, skip." }
-                }
+            if (adbMode) {
+                // ADB 模式下无法设置 SSAID
+                log { "SSAID restore is not supported in ADB mode." }
             } else {
-                log { "Failed to get uid of $packageName." }
+                val uid = rootService.getPackageUid(packageName = packageName, userId = userId)
+                if (uid != -1) {
+                    if (ssaid.isNotEmpty()) {
+                        log { "Ssaid: $ssaid" }
+                        rootService.setPackageSsaidAsUser(packageName, uid, userId, ssaid)
+                    } else {
+                        log { "Ssaid is empty, skip." }
+                    }
+                } else {
+                    log { "Failed to get uid of $packageName." }
+                }
             }
         } else {
             log { "Skip." }

@@ -279,8 +279,8 @@ object AdbService {
     /**
      * 强制停止应用
      */
-    fun forceStopPackage(packageName: String): AdbResult {
-        return execute("am", "force-stop", packageName)
+    fun forceStopPackage(packageName: String, userId: Int = 0): AdbResult {
+        return execute("am", "force-stop", "--user", userId.toString(), packageName)
     }
 
     /**
