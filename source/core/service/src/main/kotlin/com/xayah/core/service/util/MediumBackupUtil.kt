@@ -7,15 +7,12 @@ import com.xayah.core.data.repository.MediaRepository
 import com.xayah.core.database.dao.TaskDao
 import com.xayah.core.datastore.readCompressionLevel
 import com.xayah.core.datastore.readFollowSymlinks
-import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.model.DataType
 import com.xayah.core.model.OperationState
-import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.database.MediaEntity
 import com.xayah.core.model.database.TaskDetailMediaEntity
 import com.xayah.core.model.util.getCompressPara
 import com.xayah.core.network.client.CloudClient
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
 import com.xayah.core.util.adb.AdbService
@@ -31,7 +28,6 @@ import kotlin.coroutines.coroutineContext
 
 class MediumBackupUtil @Inject constructor(
     @ApplicationContext val context: Context,
-    private val rootService: RemoteRootService,
     private val taskDao: TaskDao,
     private val mediaRepository: MediaRepository,
     private val commonBackupUtil: CommonBackupUtil,
@@ -79,10 +75,9 @@ class MediumBackupUtil @Inject constructor(
         val out = mutableListOf<String>()
         val src = m.path
         val srcDir = PathUtil.getParentPath(src)
-        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
 
         // Check the existence of origin path.
-        val srcExists = if (adbMode) AdbService.exists(src) else rootService.exists(src)
+        val srcExists = AdbService.exists(src)
         if (!srcExists) {
             isSuccess = false
             out.add(log { "Not exist: $src" })
@@ -90,9 +85,9 @@ class MediumBackupUtil @Inject constructor(
             return@run ShellResult(code = -1, input = listOf(), out = out)
         }
 
-        val sizeBytes = if (adbMode) AdbService.calculateSizeLong(src) else rootService.calculateSize(src)
+        val sizeBytes = AdbService.calculateSizeLong(src)
         t.updateInfo(state = OperationState.PROCESSING, bytes = sizeBytes)
-        val dstExists = if (adbMode) AdbService.exists(dst) else rootService.exists(dst)
+        val dstExists = AdbService.exists(dst)
         if (dstExists && sizeBytes == r?.getDataBytes()) {
             t.updateInfo(state = OperationState.SKIP)
             out.add(log { "Data has not changed." })
@@ -114,7 +109,7 @@ class MediumBackupUtil @Inject constructor(
                 out.addAll(result.out)
                 if (result.isSuccess) {
                     m.setDataBytes(sizeBytes)
-                    m.setDisplayBytes(if (adbMode) AdbService.calculateSizeLong(dst) else rootService.calculateSize(dst))
+                    m.setDisplayBytes(AdbService.calculateSizeLong(dst))
                 }
             }
         }

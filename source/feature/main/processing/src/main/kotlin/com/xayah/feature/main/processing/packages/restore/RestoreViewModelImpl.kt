@@ -11,7 +11,6 @@ import com.xayah.core.model.StorageMode
 import com.xayah.core.model.database.PackageEntity
 import com.xayah.core.model.util.formatSize
 import com.xayah.core.network.client.getCloud
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.packages.restore.ProcessingServiceProxyCloudImpl
 import com.xayah.core.service.packages.restore.ProcessingServiceProxyLocalImpl
 import com.xayah.core.ui.material3.SnackbarDuration
@@ -20,6 +19,7 @@ import com.xayah.core.ui.model.DialogRadioItem
 import com.xayah.core.ui.route.MainRoutes
 import com.xayah.core.ui.viewmodel.IndexUiEffect
 import com.xayah.core.util.LogUtil
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.decodeURL
 import com.xayah.core.util.localBackupSaveDir
 import com.xayah.core.util.navigateSingle
@@ -45,14 +45,13 @@ import javax.inject.Inject
 @HiltViewModel
 class RestoreViewModelImpl @Inject constructor(
     @ApplicationContext private val mContext: Context,
-    private val mRootService: RemoteRootService,
     mTaskRepo: TaskRepository,
     private val mPkgRepo: PackageRepository,
     private val mCloudRepo: CloudRepository,
     mLocalService: ProcessingServiceProxyLocalImpl,
     mCloudService: ProcessingServiceProxyCloudImpl,
     private val args: SavedStateHandle,
-) : AbstractPackagesProcessingViewModel(mContext, mRootService, mTaskRepo, mLocalService, mCloudService) {
+) : AbstractPackagesProcessingViewModel(mContext, mTaskRepo, mLocalService, mCloudService) {
     override suspend fun onOtherEvent(state: IndexUiState, intent: ProcessingUiIntent) {
         when (intent) {
             is UpdateApps -> {
@@ -119,7 +118,7 @@ class RestoreViewModelImpl @Inject constructor(
             }
 
             is GetUsers -> {
-                val users = mRootService.getUsers().map { it.id }.toMutableSet()
+                val users = AdbService.getUsers().map { it }.toMutableSet()
                 mPkgRepo.queryUserIds(OpType.RESTORE).forEach {
                     users.add(it)
                 }

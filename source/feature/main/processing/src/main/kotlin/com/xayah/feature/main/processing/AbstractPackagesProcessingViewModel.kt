@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.navigation.NavController
 import com.xayah.core.data.repository.TaskRepository
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.AbstractProcessingServiceProxy
 import com.xayah.core.ui.model.ProcessingDataCardItem
 import com.xayah.core.ui.util.toProcessingCardItem
@@ -23,11 +22,10 @@ data object GetUsers : ProcessingUiIntent()
 @ExperimentalMaterial3Api
 abstract class AbstractPackagesProcessingViewModel(
     @ApplicationContext private val mContext: Context,
-    mRootService: RemoteRootService,
-    private val mTaskRepo: TaskRepository,
+    mTaskRepo: TaskRepository,
     mLocalService: AbstractProcessingServiceProxy,
     mCloudService: AbstractProcessingServiceProxy,
-) : AbstractProcessingViewModel(mContext, mRootService, mTaskRepo, mLocalService, mCloudService) {
+) : AbstractProcessingViewModel(mContext, mTaskRepo, mLocalService, mCloudService) {
     override val _dataItems: Flow<List<ProcessingDataCardItem>> = _taskId.flatMapLatest { id ->
         mTaskRepo.queryPackageFlow(id)
             .map { packages ->

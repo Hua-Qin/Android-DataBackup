@@ -1,31 +1,25 @@
 package com.xayah.feature.main.list
 
-import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xayah.core.data.repository.AppsRepo
 import com.xayah.core.data.repository.FilesRepo
 import com.xayah.core.data.repository.ListDataRepo
-import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.model.App
 import com.xayah.core.model.DataState
 import com.xayah.core.model.File
 import com.xayah.core.model.OpType
-import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.Target
 import com.xayah.core.model.database.PackageEntity
-import com.xayah.core.model.util.of
 import com.xayah.core.ui.route.MainRoutes
 import com.xayah.core.util.decodeURL
 import com.xayah.core.util.launchOnDefault
 import com.xayah.feature.main.list.ListItemsUiState.Loading
 import com.xayah.feature.main.list.ListItemsUiState.Success
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
@@ -36,7 +30,6 @@ class ListItemsViewModel @Inject constructor(
     listDataRepo: ListDataRepo,
     private val appsRepo: AppsRepo,
     private val filesRepo: FilesRepo,
-    @ApplicationContext private val context: Context,
 ) : ViewModel() {
     private val target: Target = Target.valueOf(savedStateHandle.get<String>(MainRoutes.ARG_TARGET)!!.decodeURL().trim())
     private val opType: OpType = OpType.of(savedStateHandle.get<String>(MainRoutes.ARG_OP_TYPE)?.decodeURL()?.trim())
@@ -73,71 +66,30 @@ class ListItemsViewModel @Inject constructor(
 
     fun onChangeFlag(id: Long, flag: Int) {
         viewModelScope.launchOnDefault {
-            val isAdbMode = context.readPermissionMode().first() == PermissionMode.ADB
-            if (isAdbMode) {
-                // ADB 模式下仅在 NONE ↔ APK 之间循环
-                when (flag) {
-                    PackageEntity.FLAG_APK -> {
-                        appsRepo.selectDataItems(
-                            id = id,
-                            apk = DataState.NotSelected,
-                            user = DataState.NotSelected,
-                            userDe = DataState.NotSelected,
-                            data = DataState.NotSelected,
-                            obb = DataState.NotSelected,
-                            media = DataState.NotSelected,
-                        )
-                    }
-
-                    else -> {
-                        appsRepo.selectDataItems(
-                            id = id,
-                            apk = DataState.Selected,
-                            user = DataState.NotSelected,
-                            userDe = DataState.NotSelected,
-                            data = DataState.NotSelected,
-                            obb = DataState.NotSelected,
-                            media = DataState.NotSelected,
-                        )
-                    }
+            // ADB 模式下仅在 NONE ↔ APK 之间循环
+            when (flag) {
+                PackageEntity.FLAG_APK -> {
+                    appsRepo.selectDataItems(
+                        id = id,
+                        apk = DataState.NotSelected,
+                        user = DataState.NotSelected,
+                        userDe = DataState.NotSelected,
+                        data = DataState.NotSelected,
+                        obb = DataState.NotSelected,
+                        media = DataState.NotSelected,
+                    )
                 }
-            } else {
-                when (flag) {
-                    PackageEntity.FLAG_APK -> {
-                        appsRepo.selectDataItems(
-                            id = id,
-                            apk = DataState.NotSelected,
-                            user = DataState.Selected,
-                            userDe = DataState.Selected,
-                            data = DataState.Selected,
-                            obb = DataState.Selected,
-                            media = DataState.Selected,
-                        )
-                    }
 
-                    PackageEntity.FLAG_ALL -> {
-                        appsRepo.selectDataItems(
-                            id = id,
-                            apk = DataState.Selected,
-                            user = DataState.NotSelected,
-                            userDe = DataState.NotSelected,
-                            data = DataState.NotSelected,
-                            obb = DataState.NotSelected,
-                            media = DataState.NotSelected,
-                        )
-                    }
-
-                    else -> {
-                        appsRepo.selectDataItems(
-                            id = id,
-                            apk = DataState.Selected,
-                            user = DataState.Selected,
-                            userDe = DataState.Selected,
-                            data = DataState.Selected,
-                            obb = DataState.Selected,
-                            media = DataState.Selected,
-                        )
-                    }
+                else -> {
+                    appsRepo.selectDataItems(
+                        id = id,
+                        apk = DataState.Selected,
+                        user = DataState.NotSelected,
+                        userDe = DataState.NotSelected,
+                        data = DataState.NotSelected,
+                        obb = DataState.NotSelected,
+                        media = DataState.NotSelected,
+                    )
                 }
             }
         }

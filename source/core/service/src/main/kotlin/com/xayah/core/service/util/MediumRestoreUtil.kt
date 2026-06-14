@@ -6,15 +6,12 @@ import com.xayah.core.data.repository.CloudRepository
 import com.xayah.core.data.repository.MediaRepository
 import com.xayah.core.database.dao.TaskDao
 import com.xayah.core.datastore.readCleanRestoring
-import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.model.DataType
 import com.xayah.core.model.OperationState
-import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.database.MediaEntity
 import com.xayah.core.model.database.TaskDetailMediaEntity
 import com.xayah.core.model.util.formatSize
 import com.xayah.core.network.client.CloudClient
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
 import com.xayah.core.util.adb.AdbService
@@ -30,7 +27,6 @@ import kotlin.coroutines.coroutineContext
 
 class MediumRestoreUtil @Inject constructor(
     @ApplicationContext val context: Context,
-    private val rootService: RemoteRootService,
     private val taskDao: TaskDao,
     private val mediaRepository: MediaRepository,
     private val cloudRepository: CloudRepository,
@@ -71,12 +67,11 @@ class MediumRestoreUtil @Inject constructor(
         val dstDir = PathUtil.getParentPath(dst)
         var isSuccess: Boolean
         val out = mutableListOf<String>()
-        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
 
         // Return if the archive doesn't exist.
-        val srcExists = if (adbMode) AdbService.exists(src) else rootService.exists(src)
+        val srcExists = AdbService.exists(src)
         if (srcExists) {
-            val sizeBytes = if (adbMode) AdbService.calculateSizeLong(src) else rootService.calculateSize(src)
+            val sizeBytes = AdbService.calculateSizeLong(src)
             t.updateInfo(state = OperationState.PROCESSING, bytes = sizeBytes)
 
             // Decompress the archive.

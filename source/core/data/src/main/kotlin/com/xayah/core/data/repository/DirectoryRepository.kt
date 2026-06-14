@@ -8,28 +8,24 @@ import com.xayah.core.database.dao.PackageDao
 import com.xayah.core.datastore.ConstantUtil
 import com.xayah.core.datastore.ConstantUtil.DEFAULT_PATH_PARENT
 import com.xayah.core.datastore.readBackupSavePath
-import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.datastore.saveBackupSavePath
-import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.StorageType
 import com.xayah.core.model.database.DirectoryEntity
 import com.xayah.core.model.database.DirectoryUpsertEntity
-import com.xayah.core.rootservice.parcelables.StatFsParcelable
-import com.xayah.core.rootservice.service.RemoteRootService
-import com.xayah.core.rootservice.util.withIOContext
 import com.xayah.core.util.PathUtil
 import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.command.PreparationUtil
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 class DirectoryRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val directoryDao: DirectoryDao,
     private val packageDao: PackageDao,
-    private val rootService: RemoteRootService,
 ) {
     fun queryActiveDirectoriesFlow(storageType: StorageType) = directoryDao.queryActiveDirectoriesFlow(storageType).distinctUntilChanged()
 
@@ -77,48 +73,13 @@ class DirectoryRepository @Inject constructor(
         }
     }
 
-    /**
-     * 检查当前是否为 ADB 模式
-     */
-    private suspend fun isAdbMode(): Boolean {
-        return context.readPermissionMode().first() == PermissionMode.ADB
-    }
-
-    /**
-     * ADB 模式下列出文件路径
-     */
-    private fun listFilePathsAdb(path: String, listFiles: Boolean = true, listDirs: Boolean = true): List<String> {
-        return AdbService.listFilePaths(path, listFiles, listDirs)
-    }
-
-    /**
-     * ADB 模式下读取文件系统状态
-     */
-    private fun readStatFsAdb(path: String): StatFsParcelable {
-        val (availableBytes, totalBytes) = AdbService.readStatFs(path)
-        return StatFsParcelable(availableBytes, totalBytes)
-    }
-
-    /**
-     * ADB 模式下计算目录大小
-     */
-    private fun calculateSizeAdb(path: String): Long {
-        return AdbService.calculateSizeLong(path)
-    }
-
     suspend fun update() {
-        withIOContext {
-            val adbMode = isAdbMode()
-
+        withContext(Dispatchers.IO) {
             // Inactivate all directories
             directoryDao.updateActive(active = false)
 
             // Internal storage
-            val internalList = if (adbMode) {
-                listFilePathsAdb(ConstantUtil.STORAGE_EMULATED_PATH, listFiles = false)
-            } else {
-                rootService.listFilePaths(ConstantUtil.STORAGE_EMULATED_PATH, listFiles = false)
-            }
+            val internalList = AdbService.listFilePaths(ConstantUtil.STORAGE_EMULATED_PATH, listFiles = false)
                 .filter { it.substring(it.lastIndexOf("/") + 1).toIntOrNull() != null }.toMutableList() // Just select 0 10 999 etc.
             if (internalList.contains(DEFAULT_PATH_PARENT).not()) {
                 internalList.add(DEFAULT_PATH_PARENT)
@@ -169,10 +130,10 @@ class DirectoryRepository @Inject constructor(
             directoryDao.queryActiveDirectories().forEach { entity ->
                 val parent = entity.parent
                 entity.error = ""
-                val statFs = if (adbMode) readStatFsAdb(parent) else rootService.readStatFs(parent)
-                entity.childUsedBytes = if (adbMode) calculateSizeAdb(entity.path) else rootService.calculateSize(entity.path)
-                entity.availableBytes = statFs.availableBytes
-                entity.totalBytes = statFs.totalBytes
+                val (availableBytes, totalBytes) = AdbService.readStatFs(parent)
+                entity.childUsedBytes = AdbService.calculateSizeLong(entity.path)
+                entity.availableBytes = availableBytes
+                entity.totalBytes = totalBytes
                 if (entity.storageType == StorageType.EXTERNAL) {
                     val tags = mutableListOf<String>()
                     val type = PreparationUtil.getExternalStorageType(parent).out.firstOrNull() ?: ""
@@ -203,13 +164,12 @@ class DirectoryRepository @Inject constructor(
     }
 
     suspend fun updateSelected() {
-        withIOContext {
-            val adbMode = isAdbMode()
+        withContext(Dispatchers.IO) {
             directoryDao.querySelectedByDirectoryType()?.apply {
-                val statFs = if (adbMode) readStatFsAdb(parent) else rootService.readStatFs(parent)
-                childUsedBytes = if (adbMode) calculateSizeAdb(path) else rootService.calculateSize(path)
-                availableBytes = statFs.availableBytes
-                totalBytes = statFs.totalBytes
+                val (availableBytes, totalBytes) = AdbService.readStatFs(parent)
+                childUsedBytes = AdbService.calculateSizeLong(path)
+                this.availableBytes = availableBytes
+                this.totalBytes = totalBytes
                 directoryDao.upsert(this)
             }
         }

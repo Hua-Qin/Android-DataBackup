@@ -18,8 +18,8 @@ import com.xayah.core.model.database.LabelFileCrossRefEntity
 import com.xayah.core.model.database.MediaEntity
 import com.xayah.core.model.database.PackageDataStates
 import com.xayah.core.model.database.PackageEntity
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.ui.route.MainRoutes
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.decodeURL
 import com.xayah.core.util.launchOnDefault
 import com.xayah.core.util.withMainContext
@@ -40,7 +40,6 @@ import javax.inject.Inject
 class DetailsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     savedStateHandle: SavedStateHandle,
-    private val rootService: RemoteRootService,
     private val appsRepo: AppsRepo,
     private val filesRepo: FilesRepo,
     private val labelsRepo: LabelsRepo,
@@ -193,11 +192,11 @@ class DetailsViewModel @Inject constructor(
                     val state = uiState.value.castTo<Success.App>()
                     val app = state.app
                     if (frozen) {
-                        rootService.setApplicationEnabledSetting(app.packageName, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, 0, app.userId, null)
+                        AdbService.enablePackage(app.packageName, app.userId)
                     } else {
-                        rootService.setApplicationEnabledSetting(app.packageName, PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER, 0, app.userId, null)
+                        AdbService.disablePackage(app.packageName, app.userId)
                     }
-                    appsRepo.setEnabled(app.id, rootService.getApplicationEnabledSetting(app.packageName, app.userId) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED)
+                    appsRepo.setEnabled(app.id, AdbService.getPackageInfo(app.packageName, app.userId)?.enabled == true)
                 }
 
                 else -> {}

@@ -16,9 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
@@ -36,11 +33,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import com.xayah.core.datastore.KeyAutoScreenOff
 import com.xayah.core.datastore.KeyResetBackupList
-import com.xayah.core.datastore.KeyBackupConfigs
-import com.xayah.core.datastore.readPermissionMode
-import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.StorageMode
 import com.xayah.core.ui.component.Clickable
 import com.xayah.core.ui.component.LocalSlotScope
@@ -79,8 +72,6 @@ fun PagePackagesBackupProcessingSetup(localNavController: NavHostController, vie
     val isTesting by viewModel.isTesting.collectAsStateWithLifecycle()
     val packages by viewModel.packages.collectAsStateWithLifecycle()
     val packagesSize by viewModel.packagesSize.collectAsStateWithLifecycle()
-    val permissionMode by context.readPermissionMode().collectAsStateWithLifecycle(PermissionMode.ROOT)
-    val isAdbMode = permissionMode == PermissionMode.ADB
 
     LaunchedEffect(null) {
         viewModel.emitIntentOnIO(UpdateApps)
@@ -113,28 +104,6 @@ fun PagePackagesBackupProcessingSetup(localNavController: NavHostController, vie
                 .verticalScroll(rememberScrollState())
                 .fillMaxSize(),
         ) {
-            val storageOptions = remember { listOf(context.getString(R.string.local), context.getString(R.string.cloud)) }
-            if (!isAdbMode) {
-                SingleChoiceSegmentedButtonRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .paddingHorizontal(SizeTokens.Level16)
-                        .paddingTop(SizeTokens.Level16)
-                ) {
-                    storageOptions.forEachIndexed { index, label ->
-                        SegmentedButton(
-                            shape = SegmentedButtonDefaults.itemShape(index = index, count = storageOptions.size),
-                            onClick = {
-                                viewModel.emitStateOnMain(state = uiState.copy(storageIndex = index, storageType = if (index == 0) StorageMode.Local else StorageMode.Cloud))
-                            },
-                            selected = index == uiState.storageIndex
-                        ) {
-                            Text(label)
-                        }
-                    }
-                }
-            }
-
             Title(title = stringResource(id = R.string.storage)) {
                 AnimatedVisibility(uiState.storageIndex == 1) {
                     if (accounts.isEmpty()) {
@@ -184,28 +153,12 @@ fun PagePackagesBackupProcessingSetup(localNavController: NavHostController, vie
                 )
             }
             Title(title = stringResource(id = R.string.settings)) {
-                if (!isAdbMode) {
-                    Switchable(
-                        key = KeyAutoScreenOff,
-                        defValue = false,
-                        title = stringResource(id = R.string.auto_screen_off),
-                        checkedText = stringResource(id = R.string.auto_screen_off_desc),
-                    )
-                }
                 Switchable(
                     key = KeyResetBackupList,
                     defValue = false,
                     title = stringResource(id = R.string.reset_backup_list),
                     checkedText = stringResource(id = R.string.reset_backup_list_desc),
                 )
-                if (!isAdbMode) {
-                    Switchable(
-                        key = KeyBackupConfigs,
-                        defValue = true,
-                        title = stringResource(id = R.string.backup_configs),
-                        checkedText = stringResource(id = R.string.backup_configs_desc),
-                    )
-                }
             }
         }
     }

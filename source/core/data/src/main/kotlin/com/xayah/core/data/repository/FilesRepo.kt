@@ -16,13 +16,15 @@ import com.xayah.core.model.database.MediaExtraInfo
 import com.xayah.core.model.database.MediaIndexInfo
 import com.xayah.core.model.database.MediaInfo
 import com.xayah.core.model.database.asExternalModel
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.util.ConfigsMediaRestoreName
 import com.xayah.core.util.DateUtil
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.localBackupSaveDir
 import com.xayah.core.util.withLog
+import com.google.gson.GsonBuilder
+import com.google.gson.reflect.TypeToken
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
@@ -36,7 +38,6 @@ class FilesRepo @Inject constructor(
     private val filesDao: MediaDao,
     private val mediaRepo: MediaRepository,
     private val pathUtil: PathUtil,
-    private val rootService: RemoteRootService,
     private val cloudRepo: CloudRepository,
 ) {
     companion object {
@@ -103,7 +104,7 @@ class FilesRepo @Inject constructor(
             if (file != null) {
                 val isSuccess = if (file.indexInfo.cloud.isEmpty()) {
                     val src = "${filesDir}/${file.archivesRelativeDir}"
-                    rootService.deleteRecursively(src)
+                    AdbService.deleteRecursively(src)
                 } else {
                     runCatching {
                         cloudRepo.withClient(file.indexInfo.cloud) { client, entity ->
@@ -153,8 +154,8 @@ class FilesRepo @Inject constructor(
 
         val files = filesDao.query(opType = OpType.BACKUP, blocked = false)
         files.forEach { m ->
-            val size = rootService.calculateSize(m.path)
-            val existed = rootService.exists(m.path)
+            val size = AdbService.calculateSizeLong(m.path)
+            val existed = AdbService.exists(m.path)
             filesDao.upsert(m.copy(mediaInfo = m.mediaInfo.copy(displayBytes = size), extraInfo = m.extraInfo.copy(existed = existed, activated = m.extraInfo.activated && existed)))
         }
     }
@@ -171,21 +172,24 @@ class FilesRepo @Inject constructor(
 
     private suspend fun loadLocalFiles(onLoad: suspend (cur: Int, max: Int, content: String) -> Unit) {
         val path = pathUtil.getLocalBackupFilesDir()
-        val paths = rootService.walkFileTree(path)
-        paths.forEachIndexed { index, pathParcelable ->
-            val fileName = PathUtil.getFileName(pathParcelable.pathString)
+        val paths = AdbService.walkFileTree(path)
+        paths.forEachIndexed { index, pathString ->
+            val fileName = PathUtil.getFileName(pathString)
             onLoad(index, paths.size, fileName)
             if (fileName == ConfigsMediaRestoreName) {
                 runCatching {
-                    rootService.readJson<MediaEntity>(pathParcelable.pathString).also { m ->
+                    val jsonText = AdbService.readJsonText(pathString)
+                    if (jsonText != null) {
+                        val m = GsonBuilder().create().fromJson<MediaEntity>(jsonText, object : TypeToken<MediaEntity>() {}.type)
                         m?.id = 0
                         m?.extraInfo?.existed = true
                         m?.extraInfo?.activated = false
                         m?.indexInfo?.cloud = ""
                         m?.indexInfo?.backupDir = context.localBackupSaveDir()
-                    }?.apply {
-                        if (filesDao.query(indexInfo.opType, preserveId, name, indexInfo.compressionType, indexInfo.cloud, indexInfo.backupDir) == null) {
-                            filesDao.upsert(this)
+                        m?.apply {
+                            if (filesDao.query(indexInfo.opType, preserveId, name, indexInfo.compressionType, indexInfo.cloud, indexInfo.backupDir) == null) {
+                                filesDao.upsert(this)
+                            }
                         }
                     }
                 }
@@ -206,15 +210,18 @@ class FilesRepo @Inject constructor(
                     if (fileName == ConfigsMediaRestoreName) {
                         runCatching {
                             cloudRepo.download(client = client, src = pathParcelable.pathString, dstDir = tmpDir) { path ->
-                                val stored = rootService.readJson<MediaEntity>(path).also { p ->
+                                val jsonText = AdbService.readJsonText(path)
+                                if (jsonText != null) {
+                                    val p = GsonBuilder().create().fromJson<MediaEntity>(jsonText, object : TypeToken<MediaEntity>() {}.type)
                                     p?.id = 0
                                     p?.extraInfo?.existed = true
                                     p?.extraInfo?.activated = false
                                     p?.indexInfo?.cloud = entity.name
                                     p?.indexInfo?.backupDir = remote
-                                }?.apply {
-                                    if (filesDao.query(indexInfo.opType, preserveId, name, indexInfo.compressionType, indexInfo.cloud, indexInfo.backupDir) == null) {
-                                        filesDao.upsert(this)
+                                    p?.apply {
+                                        if (filesDao.query(indexInfo.opType, preserveId, name, indexInfo.compressionType, indexInfo.cloud, indexInfo.backupDir) == null) {
+                                            filesDao.upsert(this)
+                                        }
                                     }
                                 }
                             }
@@ -282,14 +289,14 @@ class FilesRepo @Inject constructor(
     }
 
     suspend fun calculateLocalFileSize(file: MediaEntity) {
-        file.mediaInfo.displayBytes = rootService.calculateSize(file.path)
+        file.mediaInfo.displayBytes = AdbService.calculateSizeLong(file.path)
         filesDao.upsert(file)
     }
 
     private fun getArchiveSrc(dstDir: String, ct: CompressionType) = "${dstDir}/${DataType.MEDIA_MEDIA.type}.${ct.suffix}"
 
     suspend fun calculateLocalFileArchiveSize(file: MediaEntity) {
-        file.mediaInfo.displayBytes = rootService.calculateSize(getArchiveSrc("${pathUtil.getLocalBackupFilesDir()}/${file.archivesRelativeDir}", file.indexInfo.compressionType))
+        file.mediaInfo.displayBytes = AdbService.calculateSizeLong(getArchiveSrc("${pathUtil.getLocalBackupFilesDir()}/${file.archivesRelativeDir}", file.indexInfo.compressionType))
         filesDao.upsert(file)
     }
 
@@ -320,8 +327,9 @@ class FilesRepo @Inject constructor(
         val fileDir = pathUtil.getLocalBackupFilesDir()
         val src = "${fileDir}/${file.archivesRelativeDir}"
         val dst = "${fileDir}/${protectedFile.archivesRelativeDir}"
-        rootService.writeJson(data = protectedFile, dst = PathUtil.getMediaRestoreConfigDst(src))
-        rootService.renameTo(src, dst)
+        val json = GsonBuilder().create().toJson(protectedFile)
+        AdbService.writeText(json, PathUtil.getMediaRestoreConfigDst(src))
+        AdbService.renameTo(src, dst)
         filesDao.update(protectedFile)
     }
 
@@ -334,9 +342,10 @@ class FilesRepo @Inject constructor(
             val dst = "${remoteFilesDir}/${protectedFile.archivesRelativeDir}"
             val tmpDir = pathUtil.getCloudTmpDir()
             val tmpJsonPath = PathUtil.getMediaRestoreConfigDst(tmpDir)
-            rootService.writeJson(data = protectedFile, dst = tmpJsonPath)
+            val json = GsonBuilder().create().toJson(protectedFile)
+            AdbService.writeText(json, tmpJsonPath)
             cloudRepo.upload(client = client, src = tmpJsonPath, dstDir = src)
-            rootService.deleteRecursively(tmpDir)
+            AdbService.deleteRecursively(tmpDir)
             client.renameTo(src, dst)
         }
     }.withLog()
@@ -354,7 +363,7 @@ class FilesRepo @Inject constructor(
     private suspend fun deleteLocalFile(file: MediaEntity) {
         val filesDir = pathUtil.getLocalBackupFilesDir()
         val src = "${filesDir}/${file.archivesRelativeDir}"
-        if (rootService.deleteRecursively(src)) {
+        if (AdbService.deleteRecursively(src)) {
             filesDao.delete(file.id)
         }
     }

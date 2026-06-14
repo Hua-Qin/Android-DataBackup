@@ -11,11 +11,12 @@ import com.xayah.core.model.database.MediaEntity
 import com.xayah.core.model.database.MediaExtraInfo
 import com.xayah.core.model.database.MediaIndexInfo
 import com.xayah.core.model.database.MediaInfo
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.util.DateUtil
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.localBackupSaveDir
+import com.google.gson.GsonBuilder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import java.text.Collator
@@ -23,7 +24,6 @@ import javax.inject.Inject
 
 class MediaRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val rootService: RemoteRootService,
     private val cloudRepository: CloudRepository,
     private val mediaDao: MediaDao,
     private val pathUtil: PathUtil,
@@ -161,7 +161,7 @@ class MediaRepository @Inject constructor(
         val filesDir = pathUtil.getLocalBackupFilesDir()
         val isSuccess = if (m.indexInfo.cloud.isEmpty()) {
             val src = "${filesDir}/${m.archivesRelativeDir}"
-            rootService.deleteRecursively(src)
+            AdbService.deleteRecursively(src)
         } else {
             runCatching {
                 cloudRepository.withClient(m.indexInfo.cloud) { client, entity ->
@@ -170,7 +170,7 @@ class MediaRepository @Inject constructor(
                     val src = "${remoteArchivesMediumDir}/${m.archivesRelativeDir}"
                     if (client.exists(src)) client.deleteRecursively(src)
                 }
-            }.onFailure(rootService.onFailure).isSuccess
+            }.isSuccess
         }
 
         if (isSuccess) mediaDao.delete(m.id)
@@ -182,8 +182,9 @@ class MediaRepository @Inject constructor(
         val isSuccess = if (mediaEntity.indexInfo.cloud.isEmpty()) {
             val src = "${filesDir}/${m.archivesRelativeDir}"
             val dst = "${filesDir}/${mediaEntity.archivesRelativeDir}"
-            rootService.writeJson(data = mediaEntity, dst = PathUtil.getMediaRestoreConfigDst(src))
-            rootService.renameTo(src, dst)
+            val json = GsonBuilder().create().toJson(mediaEntity)
+            AdbService.writeText(json, PathUtil.getMediaRestoreConfigDst(src))
+            AdbService.renameTo(src, dst)
         } else {
             runCatching {
                 cloudRepository.withClient(mediaEntity.indexInfo.cloud) { client, entity ->
@@ -193,12 +194,13 @@ class MediaRepository @Inject constructor(
                     val dst = "${remoteArchivesMediumDir}/${mediaEntity.archivesRelativeDir}"
                     val tmpDir = pathUtil.getCloudTmpDir()
                     val tmpJsonPath = PathUtil.getMediaRestoreConfigDst(tmpDir)
-                    rootService.writeJson(data = mediaEntity, dst = tmpJsonPath)
+                    val json = GsonBuilder().create().toJson(mediaEntity)
+                    AdbService.writeText(json, tmpJsonPath)
                     cloudRepository.upload(client = client, src = tmpJsonPath, dstDir = src)
-                    rootService.deleteRecursively(tmpDir)
+                    AdbService.deleteRecursively(tmpDir)
                     client.renameTo(src, dst)
                 }
-            }.onFailure(rootService.onFailure).isSuccess
+            }.isSuccess
         }
         if (isSuccess) {
             mediaDao.delete(m.id)

@@ -8,7 +8,6 @@ import com.xayah.core.network.R
 import com.xayah.core.network.io.CountingInputStreamImpl
 import com.xayah.core.network.io.CountingOutputStreamImpl
 import com.xayah.core.network.util.getExtraEntity
-import com.xayah.core.rootservice.parcelables.PathParcelable
 import com.xayah.core.util.GsonUtil
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
@@ -221,21 +220,21 @@ class FTPClientImpl(private val entity: CloudEntity, private val extra: FTPExtra
         return DirChildrenParcelable(files = files, directories = directories)
     }
 
-    override fun walkFileTree(src: String): List<PathParcelable> {
-        val pathParcelableList = mutableListOf<PathParcelable>()
+    override fun walkFileTree(src: String): List<String> {
+        val pathList = mutableListOf<String>()
         val srcFile = listFile(src)
         if (srcFile.isDirectory.not()) {
-            pathParcelableList.add(PathParcelable(src))
+            pathList.add(src)
         } else {
             val files = listFiles(src)
             for (i in files.files) {
-                pathParcelableList.add(PathParcelable("${src}/${i.name}"))
+                pathList.add("${src}/${i.name}")
             }
             for (i in files.directories) {
-                pathParcelableList.addAll(walkFileTree("${src}/${i.name}"))
+                pathList.addAll(walkFileTree("${src}/${i.name}"))
             }
         }
-        return pathParcelableList
+        return pathList
     }
 
     override fun exists(src: String): Boolean = runCatching { listFile(src) }.isSuccess

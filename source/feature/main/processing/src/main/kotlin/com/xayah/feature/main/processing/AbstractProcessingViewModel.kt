@@ -1,16 +1,13 @@
 package com.xayah.feature.main.processing
 
 import android.content.Context
-import android.view.SurfaceControlHidden
 import androidx.compose.material3.ExperimentalMaterial3Api
 import com.xayah.core.data.repository.TaskRepository
-import com.xayah.core.datastore.readScreenOffCountDown
 import com.xayah.core.model.OperationState
 import com.xayah.core.model.ProcessingType
 import com.xayah.core.model.StorageMode
 import com.xayah.core.model.database.CloudEntity
 import com.xayah.core.model.database.TaskEntity
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.AbstractProcessingServiceProxy
 import com.xayah.core.ui.model.ProcessingCardItem
 import com.xayah.core.ui.model.ProcessingDataCardItem
@@ -38,14 +35,12 @@ open class ProcessingUiIntent : UiIntent {
     data object Process : ProcessingUiIntent()
     data object Initialize : ProcessingUiIntent()
     data object DestroyService : ProcessingUiIntent()
-    data object TurnOffScreen : ProcessingUiIntent()
 }
 
 @ExperimentalCoroutinesApi
 @ExperimentalMaterial3Api
 abstract class AbstractProcessingViewModel(
     @ApplicationContext private val mContext: Context,
-    private val mRootService: RemoteRootService,
     private val mTaskRepo: TaskRepository,
     private val mLocalService: AbstractProcessingServiceProxy,
     private val mCloudService: AbstractProcessingServiceProxy,
@@ -58,14 +53,6 @@ abstract class AbstractProcessingViewModel(
     )
 ) {
     open suspend fun onOtherEvent(state: IndexUiState, intent: ProcessingUiIntent) {}
-
-    init {
-        mRootService.onFailure = {
-            val msg = it.message
-            if (msg != null)
-                emitEffectOnIO(IndexUiEffect.ShowSnackbar(message = msg))
-        }
-    }
 
     override suspend fun onEvent(state: IndexUiState, intent: ProcessingUiIntent) {
         when (intent) {
@@ -98,13 +85,6 @@ abstract class AbstractProcessingViewModel(
                 } else {
                     // Local
                     mLocalService.destroyService(true)
-                }
-            }
-
-            is ProcessingUiIntent.TurnOffScreen -> {
-                if (uiState.value.state == OperationState.PROCESSING) {
-                    mRootService.setScreenOffTimeout(Int.MAX_VALUE)
-                    mRootService.setDisplayPowerMode(SurfaceControlHidden.POWER_MODE_OFF)
                 }
             }
 
@@ -144,7 +124,6 @@ abstract class AbstractProcessingViewModel(
             }
             .flowOnIO()
     }
-    private val _screenOffCountDown = mContext.readScreenOffCountDown().flowOnIO()
 
     val task: StateFlow<TaskEntity?> = _task.stateInScope(null)
     val preItemsProgress: StateFlow<Float> = _preItemsProgress.stateInScope(0F)
@@ -152,5 +131,4 @@ abstract class AbstractProcessingViewModel(
     val dataItems: StateFlow<List<ProcessingDataCardItem>> by lazy { _dataItems.stateInScope(listOf()) }
     val postItemsProgress: StateFlow<Float> = _postItemsProgress.stateInScope(0F)
     val postItems: StateFlow<List<ProcessingCardItem>> = _postItems.stateInScope(listOf())
-    val screenOffCountDown: StateFlow<Int> = _screenOffCountDown.stateInScope(0)
 }

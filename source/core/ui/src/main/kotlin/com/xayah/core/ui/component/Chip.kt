@@ -46,7 +46,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import com.xayah.core.model.DataType
-import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.SortType
 import com.xayah.core.model.database.PackageDataStates
 import com.xayah.core.model.database.PackageDataStates.Companion.getDisplayStats
@@ -449,7 +448,7 @@ fun RoundChip(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, labe
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
-fun DataChips(selections: PackageDataStates, displayStats: PackageDataStats? = null, isCalculating: Boolean = false, permissionMode: PermissionMode = PermissionMode.ROOT, onItemClick: (DataType, Boolean) -> Unit) {
+fun DataChips(selections: PackageDataStates, displayStats: PackageDataStats? = null, isCalculating: Boolean = false, onItemClick: (DataType, Boolean) -> Unit) {
     FlowRow(
         modifier = Modifier
             .fillMaxWidth()
@@ -458,22 +457,11 @@ fun DataChips(selections: PackageDataStates, displayStats: PackageDataStats? = n
         verticalArrangement = Arrangement.spacedBy(SizeTokens.Level8),
         maxItemsInEachRow = 2
     ) {
-        val allItems = remember {
+        // 仅显示 APK 数据项（ADB 模式）
+        val items = remember {
             listOf(
                 DataType.PACKAGE_APK,
-                DataType.PACKAGE_USER,
-                DataType.PACKAGE_USER_DE,
-                DataType.PACKAGE_DATA,
-                DataType.PACKAGE_OBB,
-                DataType.PACKAGE_MEDIA
             )
-        }
-
-        // ADB 模式下仅显示 APK 数据项
-        val items = if (permissionMode == PermissionMode.ADB) {
-            allItems.filter { it == DataType.PACKAGE_APK }
-        } else {
-            allItems
         }
 
         items.forEach {

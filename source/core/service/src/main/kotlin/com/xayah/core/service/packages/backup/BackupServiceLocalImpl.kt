@@ -10,7 +10,6 @@ import com.xayah.core.model.TaskType
 import com.xayah.core.model.database.PackageEntity
 import com.xayah.core.model.database.TaskDetailPackageEntity
 import com.xayah.core.model.database.TaskEntity
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.util.CommonBackupUtil
 import com.xayah.core.service.util.PackagesBackupUtil
 import com.xayah.core.util.PathUtil
@@ -21,9 +20,6 @@ import javax.inject.Inject
 @AndroidEntryPoint
 internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupService() {
     override val mTAG: String = "BackupServiceLocalImpl"
-
-    @Inject
-    override lateinit var mRootService: RemoteRootService
 
     @Inject
     override lateinit var mPathUtil: PathUtil

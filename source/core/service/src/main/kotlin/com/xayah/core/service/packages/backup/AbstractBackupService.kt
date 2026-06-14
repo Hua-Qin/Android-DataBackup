@@ -5,13 +5,11 @@ import com.xayah.core.common.util.toLineString
 import com.xayah.core.datastore.readBackupConfigs
 import com.xayah.core.datastore.readBackupItself
 import com.xayah.core.datastore.readKillAppOption
-import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.datastore.readResetBackupList
 import com.xayah.core.datastore.saveLastBackupTime
 import com.xayah.core.model.DataType
 import com.xayah.core.model.OpType
 import com.xayah.core.model.OperationState
-import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.ProcessingInfoType
 import com.xayah.core.model.ProcessingType
 import com.xayah.core.model.TaskType
@@ -126,14 +124,8 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
 
                 log { "Trying to create: $mAppsDir." }
                 log { "Trying to create: $mConfigsDir." }
-                val adbMode = mContext.readPermissionMode().first() == PermissionMode.ADB
-                if (adbMode) {
-                    AdbService.mkdirs(mAppsDir)
-                    AdbService.mkdirs(mConfigsDir)
-                } else {
-                    mRootService.mkdirs(mAppsDir)
-                    mRootService.mkdirs(mConfigsDir)
-                }
+                AdbService.mkdirs(mAppsDir)
+                AdbService.mkdirs(mConfigsDir)
                 val isSuccess = runCatchingOnService { onTargetDirsCreated() }
                 entity.update(progress = 1f, state = if (isSuccess) OperationState.DONE else OperationState.ERROR)
             }
@@ -149,7 +141,6 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
 
         val killAppOption = mContext.readKillAppOption().first()
         log { "Kill app option: $killAppOption" }
-        val adbMode = mContext.readPermissionMode().first() == PermissionMode.ADB
 
         mPkgEntities.forEachIndexed { index, pkg ->
             executeAtLeast {
@@ -169,7 +160,7 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
                 val p = pkg.packageEntity
                 val dstDir = "${mAppsDir}/${p.archivesRelativeDir}"
                 var restoreEntity = mPackageDao.query(p.packageName, OpType.RESTORE, p.userId, p.preserveId, p.indexInfo.compressionType, mTaskEntity.cloud, mTaskEntity.backupDir)
-                if (adbMode) AdbService.mkdirs(dstDir) else mRootService.mkdirs(dstDir)
+                AdbService.mkdirs(dstDir)
                 if (onAppDirCreated(archivesRelativeDir = p.archivesRelativeDir)) {
                     backup(type = DataType.PACKAGE_APK, p = p, r = restoreEntity, t = pkg, dstDir = dstDir)
                     backup(type = DataType.PACKAGE_USER, p = p, r = restoreEntity, t = pkg, dstDir = dstDir)
@@ -190,12 +181,8 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
                             extraInfo = p.extraInfo.copy(activated = false)
                         )
                         val configDst = PathUtil.getPackageRestoreConfigDst(dstDir = dstDir)
-                        if (adbMode) {
-                            val json = com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(restoreEntity)
-                            AdbService.writeText(json, configDst)
-                        } else {
-                            mRootService.writeJson(data = restoreEntity, dst = configDst)
-                        }
+                        val json = com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(restoreEntity)
+                        AdbService.writeText(json, configDst)
                         onConfigSaved(path = configDst, archivesRelativeDir = p.archivesRelativeDir)
                         mPackageDao.upsert(restoreEntity)
                         mPackageDao.upsert(p)

@@ -16,7 +16,6 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:data"))
     implementation(project(":core:util"))
-    implementation(project(":core:rootservice"))
     implementation(project(":feature:setup"))
 
     // Compose Navigation

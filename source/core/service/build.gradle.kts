@@ -16,7 +16,6 @@ dependencies {
     implementation(project(":core:util"))
     implementation(project(":core:database"))
     implementation(project(":core:datastore"))
-    implementation(project(":core:rootservice"))
     implementation(project(":core:data"))
     implementation(project(":core:network"))
     compileOnly(project(":core:hiddenapi"))

@@ -25,7 +25,6 @@ import com.xayah.core.model.database.PackageExtraInfo
 import com.xayah.core.model.database.PackageIndexInfo
 import com.xayah.core.model.database.PackageInfo
 import com.xayah.core.model.database.PackageStorageStats
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.util.CommonBackupUtil
 import com.xayah.core.ui.component.DialogState
 import com.xayah.core.ui.component.select
@@ -39,7 +38,9 @@ import com.xayah.core.ui.viewmodel.UiIntent
 import com.xayah.core.ui.viewmodel.UiState
 import com.xayah.core.util.ConfigsConfigurationsName
 import com.xayah.core.util.PathUtil
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.withLog
+import com.google.gson.reflect.TypeToken
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -63,7 +64,6 @@ sealed class IndexUiIntent : UiIntent {
 @HiltViewModel
 class IndexViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val rootService: RemoteRootService,
     private val packageRepo: PackageRepository,
     private val cloudRepo: CloudRepository,
     private val mediaRepo: MediaRepository,
@@ -82,7 +82,7 @@ class IndexViewModel @Inject constructor(
     override suspend fun onEvent(state: IndexUiState, intent: IndexUiIntent) {
         when (intent) {
             is IndexUiIntent.Export -> {
-                rootService.mkdirs(pathUtil.getLocalBackupConfigsDir())
+                AdbService.mkdirs(pathUtil.getLocalBackupConfigsDir())
                 val result = commonBackupUtil.backupConfigs(pathUtil.getLocalBackupConfigsDir())
                 emitEffect(IndexUiEffect.DismissSnackbar)
                 emitEffect(IndexUiEffect.ShowSnackbar(type = if (result.isSuccess) SnackbarType.Success else SnackbarType.Error, message = result.outString, duration = SnackbarDuration.Short))
@@ -90,8 +90,11 @@ class IndexViewModel @Inject constructor(
 
             is IndexUiIntent.Import -> {
                 val src = "${pathUtil.getLocalBackupConfigsDir()}/$ConfigsConfigurationsName"
-                if (rootService.exists(src)) {
-                    val config = rootService.readJson<Configurations>(src)
+                if (AdbService.exists(src)) {
+                    val jsonText = AdbService.readJsonText(src)
+                    val config = jsonText?.let {
+                        com.google.gson.GsonBuilder().create().fromJson<Configurations>(it, object : TypeToken<Configurations>() {}.type)
+                    }
                     val items = mutableListOf<DialogCheckBoxItem<String>>()
                     if (config != null) {
                         runCatching {

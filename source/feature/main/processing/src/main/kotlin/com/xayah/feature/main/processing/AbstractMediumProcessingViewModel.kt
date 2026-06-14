@@ -3,7 +3,6 @@ package com.xayah.feature.main.processing
 import android.content.Context
 import androidx.compose.material3.ExperimentalMaterial3Api
 import com.xayah.core.data.repository.TaskRepository
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.AbstractProcessingServiceProxy
 import com.xayah.core.ui.model.ProcessingDataCardItem
 import com.xayah.core.ui.util.toProcessingCardItem
@@ -19,11 +18,10 @@ data object UpdateFiles : ProcessingUiIntent()
 @ExperimentalMaterial3Api
 abstract class AbstractMediumProcessingViewModel(
     @ApplicationContext private val mContext: Context,
-    mRootService: RemoteRootService,
-    private val mTaskRepo: TaskRepository,
+    mTaskRepo: TaskRepository,
     mLocalService: AbstractProcessingServiceProxy,
     mCloudService: AbstractProcessingServiceProxy,
-) : AbstractProcessingViewModel(mContext, mRootService, mTaskRepo, mLocalService, mCloudService) {
+) : AbstractProcessingViewModel(mContext, mTaskRepo, mLocalService, mCloudService) {
     override val _dataItems: Flow<List<ProcessingDataCardItem>> = _taskId.flatMapLatest { id ->
         mTaskRepo.queryMediaFlow(id)
             .map { medium ->

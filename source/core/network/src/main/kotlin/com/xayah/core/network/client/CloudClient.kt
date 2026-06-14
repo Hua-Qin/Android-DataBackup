@@ -8,7 +8,6 @@ import com.xayah.core.model.database.SFTPExtra
 import com.xayah.core.model.database.SMBExtra
 import com.xayah.core.model.database.WebDAVExtra
 import com.xayah.core.network.util.getExtraEntity
-import com.xayah.core.rootservice.parcelables.PathParcelable
 import com.xayah.libpickyou.parcelables.DirChildrenParcelable
 
 interface CloudClient {
@@ -24,7 +23,7 @@ interface CloudClient {
     fun clearEmptyDirectoriesRecursively(src: String)
     fun deleteRecursively(src: String)
     fun listFiles(src: String): DirChildrenParcelable
-    fun walkFileTree(src: String): List<PathParcelable>
+    fun walkFileTree(src: String): List<String>
     fun exists(src: String): Boolean
     fun size(src: String): Long
     suspend fun testConnection()

@@ -33,9 +33,7 @@ import androidx.compose.ui.res.vectorResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xayah.core.common.util.BuildConfigUtil
-import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.model.OpType
-import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.Target
 import com.xayah.core.ui.component.DismissState
 import com.xayah.core.ui.component.IconButton
@@ -67,8 +65,6 @@ fun PageDashboard() {
     val directoryState by viewModel.directoryState.collectAsStateWithLifecycle()
     val nullBackupDir by remember(directoryState) { mutableStateOf(directoryState == null) }
     val dialogState = LocalSlotScope.current!!.dialogSlot
-    val permissionMode by context.readPermissionMode().collectAsStateWithLifecycle(PermissionMode.ROOT)
-    val isAdbMode = permissionMode == PermissionMode.ADB
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(null) {
@@ -157,19 +153,6 @@ fun PageDashboard() {
                         onColorContainer = ThemedColorSchemeKeyTokens.RedOnPrimaryContainer
                     ) {
                         navController.navigateSingle(MainRoutes.List.getRoute(target = Target.Apps, opType = OpType.BACKUP))
-                    }
-                    if (!isAdbMode) {
-                        QuickActionsButton(
-                            modifier = Modifier.weight(1f),
-                            enabled = nullBackupDir.not(),
-                            title = stringResource(id = R.string.backup_files),
-                            icon = ImageVector.vectorResource(id = R.drawable.ic_rounded_acute),
-                            colorContainer = ThemedColorSchemeKeyTokens.YellowPrimaryContainer,
-                            colorL80D20 = ThemedColorSchemeKeyTokens.YellowL80D20,
-                            onColorContainer = ThemedColorSchemeKeyTokens.YellowOnPrimaryContainer
-                        ) {
-                            navController.navigateSingle(MainRoutes.List.getRoute(target = Target.Files, opType = OpType.BACKUP))
-                        }
                     }
                     // TODO MMS/SMS, Contacts backup/restore
 //                    QuickActionsButton(

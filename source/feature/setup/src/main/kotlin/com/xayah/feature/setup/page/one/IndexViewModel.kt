@@ -6,8 +6,6 @@ import android.os.Build
 import androidx.compose.material3.ExperimentalMaterial3Api
 import com.topjohnwu.superuser.Shell
 import com.xayah.core.common.util.BuildConfigUtil
-import com.xayah.core.datastore.savePermissionMode
-import com.xayah.core.model.PermissionMode
 import com.xayah.core.ui.viewmodel.BaseViewModel
 import com.xayah.core.ui.viewmodel.IndexUiEffect
 import com.xayah.core.ui.viewmodel.UiIntent
@@ -70,7 +68,6 @@ class IndexViewModel @Inject constructor(
                             BaseUtil.kill(context, "${context.packageName}:root:daemon")
                         }.withLog()
                         _rootState.value = if (runCatching { Shell.getShell().isRoot }.getOrElse { false }) {
-                            context.savePermissionMode(PermissionMode.ROOT)
                             EnvState.Succeed
                         } else EnvState.Failed
                     }
@@ -87,7 +84,6 @@ class IndexViewModel @Inject constructor(
                         // 3. 请求权限后通过 AdbService.permissionGranted 回调更新状态
                         val available = AdbService.isAvailable()
                         if (available) {
-                            context.savePermissionMode(PermissionMode.ADB)
                             _adbState.value = EnvState.Succeed
                         } else if (AdbService.isBinderAlive()) {
                             // Binder 存活但权限未授予，请求权限
@@ -95,7 +91,6 @@ class IndexViewModel @Inject constructor(
                             // 等待权限回调，短暂延迟后再次检查
                             kotlinx.coroutines.delay(1000)
                             if (AdbService.isAvailable()) {
-                                context.savePermissionMode(PermissionMode.ADB)
                                 _adbState.value = EnvState.Succeed
                             } else {
                                 _adbState.value = EnvState.Failed

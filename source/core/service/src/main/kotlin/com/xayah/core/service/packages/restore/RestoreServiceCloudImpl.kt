@@ -13,7 +13,6 @@ import com.xayah.core.model.database.PackageEntity
 import com.xayah.core.model.database.TaskDetailPackageEntity
 import com.xayah.core.model.database.TaskEntity
 import com.xayah.core.network.client.CloudClient
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.util.CommonBackupUtil
 import com.xayah.core.service.util.PackagesRestoreUtil
 import com.xayah.core.util.PathUtil
@@ -23,9 +22,6 @@ import javax.inject.Inject
 @AndroidEntryPoint
 internal class RestoreServiceCloudImpl @Inject constructor() : AbstractRestoreService() {
     override val mTAG: String = "RestoreServiceCloudImpl"
-
-    @Inject
-    override lateinit var mRootService: RemoteRootService
 
     @Inject
     override lateinit var mPathUtil: PathUtil

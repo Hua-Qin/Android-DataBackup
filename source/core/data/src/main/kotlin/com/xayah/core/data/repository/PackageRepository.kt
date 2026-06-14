@@ -22,16 +22,19 @@ import com.xayah.core.model.database.PackageExtraInfo
 import com.xayah.core.model.database.PackageIndexInfo
 import com.xayah.core.model.database.PackageInfo
 import com.xayah.core.model.database.PackageStorageStats
+import com.xayah.core.model.database.PackageUpdateEntity
 import com.xayah.core.model.util.suffixOf
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.util.DateUtil
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.command.Tar
 import com.xayah.core.util.iconDir
 import com.xayah.core.util.localBackupSaveDir
 import com.xayah.core.util.withLog
+import com.google.gson.GsonBuilder
+import com.google.gson.reflect.TypeToken
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -40,7 +43,6 @@ import javax.inject.Inject
 
 class PackageRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val rootService: RemoteRootService,
     private val cloudRepository: CloudRepository,
     private val packageDao: PackageDao,
     private val pathUtil: PathUtil,
@@ -155,8 +157,9 @@ class PackageRepository @Inject constructor(
         val isSuccess = if (pkgEntity.indexInfo.cloud.isEmpty()) {
             val src = "${appsDir}/${p.archivesRelativeDir}"
             val dst = "${appsDir}/${pkgEntity.archivesRelativeDir}"
-            rootService.writeJson(data = pkgEntity, dst = PathUtil.getPackageRestoreConfigDst(src))
-            rootService.renameTo(src, dst)
+            val json = GsonBuilder().create().toJson(pkgEntity)
+            AdbService.writeText(json, PathUtil.getPackageRestoreConfigDst(src))
+            AdbService.renameTo(src, dst)
         } else {
             runCatching {
                 cloudRepository.withClient(pkgEntity.indexInfo.cloud) { client, entity ->
@@ -166,12 +169,13 @@ class PackageRepository @Inject constructor(
                     val dst = "${remoteArchivesPackagesDir}/${pkgEntity.archivesRelativeDir}"
                     val tmpDir = pathUtil.getCloudTmpDir()
                     val tmpJsonPath = PathUtil.getPackageRestoreConfigDst(tmpDir)
-                    rootService.writeJson(data = pkgEntity, dst = tmpJsonPath)
+                    val json = GsonBuilder().create().toJson(pkgEntity)
+                    AdbService.writeText(json, tmpJsonPath)
                     cloudRepository.upload(client = client, src = tmpJsonPath, dstDir = src)
-                    rootService.deleteRecursively(tmpDir)
+                    AdbService.deleteRecursively(tmpDir)
                     client.renameTo(src, dst)
                 }
-            }.onFailure(rootService.onFailure).isSuccess
+            }.isSuccess
         }
         if (isSuccess) {
             packageDao.delete(p.id)
@@ -183,7 +187,7 @@ class PackageRepository @Inject constructor(
         val appsDir = pathUtil.getLocalBackupAppsDir()
         val isSuccess = if (p.indexInfo.cloud.isEmpty()) {
             val src = "${appsDir}/${p.archivesRelativeDir}"
-            rootService.deleteRecursively(src)
+            AdbService.deleteRecursively(src)
         } else {
             runCatching {
                 cloudRepository.withClient(p.indexInfo.cloud) { client, entity ->
@@ -192,7 +196,7 @@ class PackageRepository @Inject constructor(
                     val src = "${remoteArchivesPackagesDir}/${p.archivesRelativeDir}"
                     if (client.exists(src)) client.deleteRecursively(src)
                 }
-            }.onFailure(rootService.onFailure).isSuccess
+            }.isSuccess
         }
 
         if (isSuccess) packageDao.delete(p.id)
@@ -210,13 +214,13 @@ class PackageRepository @Inject constructor(
         var serialTimestamp: Long
         BaseUtil.mkdirs(context.iconDir())
 
-        rootService.listFilePaths(backupDir).forEach { userPath ->
+        AdbService.listFilePaths(backupDir).forEach { userPath ->
             // Timestamp serial for "Cover".
             serialTimestamp = DateUtil.getTimestamp()
             val userId = userPath.split("/").lastOrNull()?.toIntOrNull() ?: 0
             val packagesDir = "${userPath}/data"
-            rootService.listFilePaths(packagesDir).forEach { pkg ->
-                rootService.listFilePaths(pkg).forEach { path ->
+            AdbService.listFilePaths(packagesDir).forEach { pkg ->
+                AdbService.listFilePaths(pkg).forEach { path ->
                     val list = path.split("/")
                     runCatching {
                         // Skip icon.png
@@ -232,8 +236,8 @@ class PackageRepository @Inject constructor(
                             val timestamp = runCatching { timestampName.toLong() }.getOrElse { serialTimestamp }
                             val dst = "${dstDir}/${packageName}/user_${userId}@${timestamp}"
                             onMsgUpdate(log { "Trying to move $path to $dst." })
-                            rootService.mkdirs(path = PathUtil.getParentPath(dst))
-                            rootService.renameTo(src = path, dst = dst)
+                            AdbService.mkdirs(PathUtil.getParentPath(dst))
+                            AdbService.renameTo(src = path, dst = dst)
                         }
                     }.withLog()
                 }
@@ -252,13 +256,13 @@ class PackageRepository @Inject constructor(
         val dstDir = pathUtil.getLocalBackupFilesDir()
         var serialTimestamp: Long
 
-        rootService.listFilePaths(backupDir).forEach { userPath ->
+        AdbService.listFilePaths(backupDir).forEach { userPath ->
             // Timestamp serial for "Cover".
             serialTimestamp = DateUtil.getTimestamp()
             val userId = userPath.split("/").lastOrNull()?.toIntOrNull() ?: 0
             val mediumDir = "${userPath}/media"
-            rootService.listFilePaths(mediumDir).forEach { media ->
-                rootService.listFilePaths(media).forEach { path ->
+            AdbService.listFilePaths(mediumDir).forEach { media ->
+                AdbService.listFilePaths(media).forEach { path ->
                     val list = path.split("/")
                     runCatching {
                         val pathListSize = list.size
@@ -272,8 +276,8 @@ class PackageRepository @Inject constructor(
                         val timestamp = runCatching { timestampName.toLong() }.getOrElse { serialTimestamp }
                         val dst = "${dstDir}/${name}@${timestamp}"
                         onMsgUpdate(log { "Trying to move $path to $dst." })
-                        rootService.mkdirs(path = PathUtil.getParentPath(dst))
-                        rootService.renameTo(src = path, dst = dst)
+                        AdbService.mkdirs(PathUtil.getParentPath(dst))
+                        AdbService.renameTo(src = path, dst = dst)
                     }.withLog()
                 }
             }
@@ -327,7 +331,7 @@ class PackageRepository @Inject constructor(
                     }
                 }
             }
-        }.onFailure(rootService.onFailure)
+        }
     }
 
     /**
@@ -373,7 +377,7 @@ class PackageRepository @Inject constructor(
                     }
                 }
             }
-        }.onFailure(rootService.onFailure)
+        }
     }
 
     /**
@@ -389,8 +393,8 @@ class PackageRepository @Inject constructor(
         val userId = 0
         BaseUtil.mkdirs(context.iconDir())
 
-        rootService.listFilePaths(packagesDir).forEach { pkgPath ->
-            rootService.listFilePaths(pkgPath).forEach { path ->
+        AdbService.listFilePaths(packagesDir).forEach { pkgPath ->
+            AdbService.listFilePaths(pkgPath).forEach { path ->
                 val list = path.split("/")
                 runCatching {
                     val pathListSize = list.size
@@ -399,8 +403,8 @@ class PackageRepository @Inject constructor(
                     val timestamp = runCatching { timestampName.toLong() }.getOrElse { serialTimestamp }
                     val dst = "${dstDir}/${packageName}/user_${userId}@${timestamp}"
                     onMsgUpdate(log { "Trying to move $path to $dst." })
-                    rootService.mkdirs(path = PathUtil.getParentPath(dst))
-                    rootService.renameTo(src = path, dst = dst)
+                    AdbService.mkdirs(PathUtil.getParentPath(dst))
+                    AdbService.renameTo(src = path, dst = dst)
                 }.withLog()
             }
         }
@@ -417,8 +421,8 @@ class PackageRepository @Inject constructor(
         val dstDir = pathUtil.getLocalBackupFilesDir()
         val serialTimestamp: Long = DateUtil.getTimestamp()
 
-        rootService.listFilePaths(mediumDir).forEach { mediaPath ->
-            rootService.listFilePaths(mediaPath).forEach { path ->
+        AdbService.listFilePaths(mediumDir).forEach { mediaPath ->
+            AdbService.listFilePaths(mediaPath).forEach { path ->
                 val list = path.split("/")
                 runCatching {
                     val pathListSize = list.size
@@ -427,8 +431,8 @@ class PackageRepository @Inject constructor(
                     val timestamp = runCatching { timestampName.toLong() }.getOrElse { serialTimestamp }
                     val dst = "${dstDir}/${name}@${timestamp}"
                     onMsgUpdate(log { "Trying to move $path to $dst." })
-                    rootService.mkdirs(path = PathUtil.getParentPath(dst))
-                    rootService.renameTo(src = path, dst = dst)
+                    AdbService.mkdirs(PathUtil.getParentPath(dst))
+                    AdbService.renameTo(src = path, dst = dst)
                 }.withLog()
             }
         }
@@ -467,7 +471,7 @@ class PackageRepository @Inject constructor(
                     }
                 }
             }
-        }.onFailure(rootService.onFailure)
+        }
     }
 
     /**
@@ -501,7 +505,7 @@ class PackageRepository @Inject constructor(
                     }
                 }
             }
-        }.onFailure(rootService.onFailure)
+        }
     }
 
     /**
@@ -512,27 +516,28 @@ class PackageRepository @Inject constructor(
         onMsgUpdate(log { "Reloading..." })
         val packageManager = context.packageManager
         val appsDir = pathUtil.getLocalBackupAppsDir()
-        val pathList = rootService.walkFileTree(appsDir)
+        val pathList = AdbService.walkFileTree(appsDir)
         val typedPathSet = mutableSetOf<String>()
         BaseUtil.mkdirs(context.iconDir())
         log { "Total paths count: ${pathList.size}" }
 
         // Classify the paths
-        pathList.forEach { path ->
-            log { "Classifying: ${path.pathString}" }
+        pathList.forEach { pathString ->
+            log { "Classifying: $pathString" }
             runCatching {
-                val pathListSize = path.pathList.size
-                val packageName = path.pathList[pathListSize - 3]
+                val pathParts = pathString.split("/")
+                val pathListSize = pathParts.size
+                val packageName = pathParts[pathListSize - 3]
                 val preserveId: Long
                 val userId: Int
-                if (path.pathList[pathListSize - 2].contains("@")) {
-                    val userIdWithPreserveId = path.pathList[pathListSize - 2].split("@")
+                if (pathParts[pathListSize - 2].contains("@")) {
+                    val userIdWithPreserveId = pathParts[pathListSize - 2].split("@")
                     preserveId = userIdWithPreserveId.lastOrNull()?.toLongOrNull() ?: 0
                     userId = userIdWithPreserveId.first().split("_").lastOrNull()?.toIntOrNull() ?: 0
                 } else {
                     // Main backup
                     preserveId = -1L
-                    userId = path.pathList[pathListSize - 2].split("_").lastOrNull()?.toIntOrNull() ?: 0
+                    userId = pathParts[pathListSize - 2].split("_").lastOrNull()?.toIntOrNull() ?: 0
                 }
                 typedPathSet.add("$packageName@$preserveId@$userId")
                 log { "packageName: $packageName, preserveId: $preserveId, userId: $userId" }
@@ -555,8 +560,8 @@ class PackageRepository @Inject constructor(
                     val timestamp = DateUtil.getTimestamp()
                     val newDir = "${appsDir}/${packageName}/user_${userId}@${timestamp}"
                     onMsgUpdate(log { "$dir move to $newDir" })
-                    rootService.mkdirs(path = PathUtil.getParentPath(newDir))
-                    rootService.renameTo(dir, newDir)
+                    AdbService.mkdirs(PathUtil.getParentPath(newDir))
+                    AdbService.renameTo(dir, newDir)
                     preserveId = timestamp
                     dir = newDir
                 }
@@ -573,15 +578,18 @@ class PackageRepository @Inject constructor(
                     ssaidState = DataState.Disabled
                 )
                 val packageEntity = runCatching {
-                    val entity = rootService.readJson<PackageEntity>(jsonPath).also { p ->
-                        p?.indexInfo?.packageName = packageName
-                        p?.indexInfo?.userId = userId
-                        p?.indexInfo?.preserveId = if (mainBackup) 0L else preserveId
-                        p?.extraInfo?.activated = false
-                        p?.indexInfo?.cloud = ""
-                        p?.indexInfo?.backupDir = localBackupSaveDir
-                        p?.dataStates = dataStates
-                    }
+                    val jsonText = AdbService.readJsonText(jsonPath)
+                    val entity = if (jsonText != null) {
+                        GsonBuilder().create().fromJson<PackageEntity>(jsonText, object : TypeToken<PackageEntity>() {}.type).also { p ->
+                            p?.indexInfo?.packageName = packageName
+                            p?.indexInfo?.userId = userId
+                            p?.indexInfo?.preserveId = if (mainBackup) 0L else preserveId
+                            p?.extraInfo?.activated = false
+                            p?.indexInfo?.cloud = ""
+                            p?.indexInfo?.backupDir = localBackupSaveDir
+                            p?.dataStates = dataStates
+                        }
+                    } else null
                     onMsgUpdate(log { "Config is reloaded from json." })
                     entity
                 }.getOrNull() ?: PackageEntity(
@@ -620,16 +628,19 @@ class PackageRepository @Inject constructor(
                     displayStats = PackageDataStats()
                 )
 
-                val archives = rootService.walkFileTree(dir)
+                val archives = AdbService.walkFileTree(dir)
 
-                archives.forEach { archivePath ->
+                archives.forEach { archivePathString ->
                     // For each archive
-                    log { "Package archive: ${archivePath.pathString}" }
+                    log { "Package archive: $archivePathString" }
                     runCatching {
-                        when (archivePath.nameWithoutExtension) {
+                        val archivePath = PathUtil.getFileName(archivePathString)
+                        val nameWithoutExtension = archivePath.substringBeforeLast(".", "")
+                        val extension = archivePath.substringAfterLast(".", "")
+                        when (nameWithoutExtension) {
                             DataType.PACKAGE_APK.type -> {
                                 onMsgUpdate(log { "Dumping apk..." })
-                                val type = CompressionType.suffixOf(archivePath.extension)
+                                val type = CompressionType.suffixOf(extension)
                                 if (type != null) {
                                     log { "Archive compression type: ${type.type}" }
                                     packageEntity.indexInfo.compressionType = type
@@ -637,12 +648,12 @@ class PackageRepository @Inject constructor(
 
                                     if (context.readReloadDumpApk().first()) {
                                         val tmpApkPath = pathUtil.getTmpApkPath(packageName = packageName)
-                                        rootService.deleteRecursively(tmpApkPath)
-                                        rootService.mkdirs(tmpApkPath)
-                                        Tar.decompress(src = archivePath.pathString, dst = tmpApkPath, extra = type.decompressPara)
-                                        rootService.listFilePaths(tmpApkPath).also { pathList ->
-                                            if (pathList.isNotEmpty()) {
-                                                rootService.getPackageArchiveInfo(pathList.first())?.apply {
+                                        AdbService.deleteRecursively(tmpApkPath)
+                                        AdbService.mkdirs(tmpApkPath)
+                                        Tar.decompress(src = archivePathString, dst = tmpApkPath, extra = type.decompressPara)
+                                        AdbService.listFilePaths(tmpApkPath).also { apkPathList ->
+                                            if (apkPathList.isNotEmpty()) {
+                                                context.packageManager.getPackageArchiveInfo(apkPathList.first())?.apply {
                                                     packageEntity.packageInfo.label = applicationInfo?.loadLabel(packageManager).toString()
                                                     packageEntity.packageInfo.versionName = versionName ?: ""
                                                     packageEntity.packageInfo.versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -652,7 +663,7 @@ class PackageRepository @Inject constructor(
                                                     }
                                                     packageEntity.packageInfo.flags = applicationInfo?.flags ?: 0
                                                     val iconPath = pathUtil.getPackageIconPath(packageName, false)
-                                                    val iconExists = rootService.exists(iconPath)
+                                                    val iconExists = AdbService.exists(iconPath)
                                                     if (iconExists.not()) {
                                                         val icon = applicationInfo?.loadIcon(packageManager)
                                                         if (icon != null) {
@@ -667,30 +678,30 @@ class PackageRepository @Inject constructor(
                                                 log { "Archive is empty." }
                                             }
                                         }
-                                        rootService.deleteRecursively(tmpApkPath)
+                                        AdbService.deleteRecursively(tmpApkPath)
                                     } else {
                                         log { "Skip dumping." }
                                     }
                                 } else {
-                                    log { "Failed to parse compression type: ${archivePath.extension}" }
+                                    log { "Failed to parse compression type: $extension" }
                                 }
                             }
 
                             DataType.PACKAGE_USER.type -> {
                                 onMsgUpdate(log { "Dumping user..." })
-                                val type = CompressionType.suffixOf(archivePath.extension)
+                                val type = CompressionType.suffixOf(extension)
                                 if (type != null) {
                                     log { "Archive compression type: ${type.type}" }
                                     packageEntity.indexInfo.compressionType = type
                                     packageEntity.dataStates.userState = DataState.Selected
                                 } else {
-                                    log { "Failed to parse compression type: ${archivePath.extension}" }
+                                    log { "Failed to parse compression type: $extension" }
                                 }
                             }
 
                             DataType.PACKAGE_USER_DE.type, DataType.PACKAGE_DATA.type, DataType.PACKAGE_OBB.type, DataType.PACKAGE_MEDIA.type -> {
-                                onMsgUpdate(log { "Dumping ${archivePath.nameWithoutExtension}..." })
-                                when (archivePath.nameWithoutExtension) {
+                                onMsgUpdate(log { "Dumping $nameWithoutExtension..." })
+                                when (nameWithoutExtension) {
                                     DataType.PACKAGE_USER_DE.type -> {
                                         dataStates.userDeState = DataState.Selected
                                     }
@@ -717,7 +728,8 @@ class PackageRepository @Inject constructor(
                 }
 
                 // Write config
-                rootService.writeJson(data = packageEntity, dst = jsonPath)
+                val json = GsonBuilder().create().toJson(packageEntity)
+                AdbService.writeText(json, jsonPath)
             }.withLog()
         }
     }
@@ -729,25 +741,26 @@ class PackageRepository @Inject constructor(
     suspend fun reloadFilesFromLocal12x(onMsgUpdate: suspend (String) -> Unit) {
         onMsgUpdate(log { "Reloading..." })
         val filesDir = pathUtil.getLocalBackupFilesDir()
-        val pathList = rootService.walkFileTree(filesDir)
+        val pathList = AdbService.walkFileTree(filesDir)
         val typedPathSet = mutableSetOf<String>()
         log { "Total paths count: ${pathList.size}" }
 
         // Classify the paths
-        pathList.forEach { path ->
-            log { "Classifying: ${path.pathString}" }
+        pathList.forEach { pathString ->
+            log { "Classifying: $pathString" }
             runCatching {
-                val pathListSize = path.pathList.size
+                val pathParts = pathString.split("/")
+                val pathListSize = pathParts.size
                 val name: String
                 val preserveId: Long
-                if (path.pathList[pathListSize - 2].contains("@")) {
-                    val nameWithPreserveId = path.pathList[pathListSize - 2].split("@")
+                if (pathParts[pathListSize - 2].contains("@")) {
+                    val nameWithPreserveId = pathParts[pathListSize - 2].split("@")
                     preserveId = nameWithPreserveId.lastOrNull()?.toLongOrNull() ?: 0
                     name = nameWithPreserveId.first()
                 } else {
                     // Main backup
                     preserveId = -1L
-                    name = path.pathList[pathListSize - 2]
+                    name = pathParts[pathListSize - 2]
                 }
                 typedPathSet.add("$name@$preserveId")
                 log { "name: $name, preserveId: $preserveId" }
@@ -769,22 +782,25 @@ class PackageRepository @Inject constructor(
                     val timestamp = DateUtil.getTimestamp()
                     val newDir = "${filesDir}/${name}@${timestamp}"
                     onMsgUpdate(log { "$dir move to $newDir" })
-                    rootService.mkdirs(path = PathUtil.getParentPath(newDir))
-                    rootService.renameTo(dir, newDir)
+                    AdbService.mkdirs(PathUtil.getParentPath(newDir))
+                    AdbService.renameTo(dir, newDir)
                     preserveId = timestamp
                     dir = newDir
                 }
                 val jsonPath = PathUtil.getMediaRestoreConfigDst(dir)
 
                 val mediaEntity = runCatching {
-                    val entity = rootService.readJson<MediaEntity>(jsonPath).also { m ->
-                        m?.indexInfo?.name = name
-                        m?.indexInfo?.preserveId = if (mainBackup) 0L else preserveId
-                        m?.extraInfo?.existed = true
-                        m?.extraInfo?.activated = false
-                        m?.indexInfo?.cloud = ""
-                        m?.indexInfo?.backupDir = localBackupSaveDir
-                    }
+                    val jsonText = AdbService.readJsonText(jsonPath)
+                    val entity = if (jsonText != null) {
+                        GsonBuilder().create().fromJson<MediaEntity>(jsonText, object : TypeToken<MediaEntity>() {}.type).also { m ->
+                            m?.indexInfo?.name = name
+                            m?.indexInfo?.preserveId = if (mainBackup) 0L else preserveId
+                            m?.extraInfo?.existed = true
+                            m?.extraInfo?.activated = false
+                            m?.indexInfo?.cloud = ""
+                            m?.indexInfo?.backupDir = localBackupSaveDir
+                        }
+                    } else null
                     onMsgUpdate(log { "Config is reloaded from json." })
                     entity
                 }.getOrNull() ?: MediaEntity(
@@ -810,22 +826,25 @@ class PackageRepository @Inject constructor(
                     ),
                 )
 
-                val archives = rootService.walkFileTree(dir)
+                val archives = AdbService.walkFileTree(dir)
 
-                archives.forEach { archivePath ->
+                archives.forEach { archivePathString ->
                     // For each archive
-                    log { "Media archive: ${archivePath.pathString}" }
+                    log { "Media archive: $archivePathString" }
                     runCatching {
-                        when (archivePath.nameWithoutExtension) {
+                        val archivePath = PathUtil.getFileName(archivePathString)
+                        val nameWithoutExtension = archivePath.substringBeforeLast(".", "")
+                        val extension = archivePath.substringAfterLast(".", "")
+                        when (nameWithoutExtension) {
                             DataType.MEDIA_MEDIA.type -> {
                                 onMsgUpdate(log { "Dumping media..." })
-                                val type = CompressionType.suffixOf(archivePath.extension)
+                                val type = CompressionType.suffixOf(extension)
                                 if (type != null) {
                                     log { "Archive compression type: ${type.type}" }
                                     mediaEntity.indexInfo.compressionType = type
                                     mediaEntity.extraInfo.existed = true
                                 } else {
-                                    log { "Failed to parse compression type: ${archivePath.extension}" }
+                                    log { "Failed to parse compression type: $extension" }
                                 }
                             }
 
@@ -835,7 +854,8 @@ class PackageRepository @Inject constructor(
                 }
 
                 // Write config
-                rootService.writeJson(data = mediaEntity, dst = jsonPath)
+                val json = GsonBuilder().create().toJson(mediaEntity)
+                AdbService.writeText(json, jsonPath)
             }.withLog()
         }
     }
@@ -914,14 +934,17 @@ class PackageRepository @Inject constructor(
                             val tmpDir = pathUtil.getCloudTmpDir()
                             var entity: PackageEntity? = null
                             cloudRepository.download(client = client, src = jsonPath, dstDir = tmpDir) { path ->
-                                entity = rootService.readJson<PackageEntity>(path).also { p ->
-                                    p?.indexInfo?.packageName = packageName
-                                    p?.indexInfo?.userId = userId
-                                    p?.indexInfo?.preserveId = if (mainBackup) 0L else preserveId
-                                    p?.extraInfo?.activated = false
-                                    p?.indexInfo?.cloud = cloud
-                                    p?.indexInfo?.backupDir = cloudEntity.remote
-                                    p?.dataStates = dataStates
+                                val jsonText = AdbService.readJsonText(path)
+                                if (jsonText != null) {
+                                    entity = GsonBuilder().create().fromJson<PackageEntity>(jsonText, object : TypeToken<PackageEntity>() {}.type).also { p ->
+                                        p?.indexInfo?.packageName = packageName
+                                        p?.indexInfo?.userId = userId
+                                        p?.indexInfo?.preserveId = if (mainBackup) 0L else preserveId
+                                        p?.extraInfo?.activated = false
+                                        p?.indexInfo?.cloud = cloud
+                                        p?.indexInfo?.backupDir = cloudEntity.remote
+                                        p?.dataStates = dataStates
+                                    }
                                 }
                                 onMsgUpdate(log { "Config is reloaded from json." })
                             }
@@ -979,14 +1002,14 @@ class PackageRepository @Inject constructor(
 
                                             if (context.readReloadDumpApk().first()) {
                                                 val tmpApkPath = pathUtil.getTmpApkPath(packageName = packageName)
-                                                rootService.deleteRecursively(tmpApkPath)
-                                                rootService.mkdirs(tmpApkPath)
+                                                AdbService.deleteRecursively(tmpApkPath)
+                                                AdbService.mkdirs(tmpApkPath)
                                                 val tmpDir = pathUtil.getCloudTmpDir()
                                                 cloudRepository.download(client = client, src = archivePath.pathString, dstDir = tmpDir) { path ->
                                                     Tar.decompress(src = path, dst = tmpApkPath, extra = type.decompressPara)
-                                                    rootService.listFilePaths(tmpApkPath).also { pathList ->
-                                                        if (pathList.isNotEmpty()) {
-                                                            rootService.getPackageArchiveInfo(pathList.first())?.apply {
+                                                    AdbService.listFilePaths(tmpApkPath).also { apkPathList ->
+                                                        if (apkPathList.isNotEmpty()) {
+                                                            context.packageManager.getPackageArchiveInfo(apkPathList.first())?.apply {
                                                                 packageEntity.packageInfo.label = applicationInfo?.loadLabel(packageManager).toString()
                                                                 packageEntity.packageInfo.versionName = versionName ?: ""
                                                                 packageEntity.packageInfo.versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -996,7 +1019,7 @@ class PackageRepository @Inject constructor(
                                                                 }
                                                                 packageEntity.packageInfo.flags = applicationInfo?.flags ?: 0
                                                                 val iconPath = pathUtil.getPackageIconPath(packageName, false)
-                                                                val iconExists = rootService.exists(iconPath)
+                                                                val iconExists = AdbService.exists(iconPath)
                                                                 if (iconExists.not()) {
                                                                     val icon = applicationInfo?.loadIcon(packageManager)
                                                                     if (icon != null) {
@@ -1012,7 +1035,7 @@ class PackageRepository @Inject constructor(
                                                         }
                                                     }
                                                 }
-                                                rootService.deleteRecursively(tmpApkPath)
+                                                AdbService.deleteRecursively(tmpApkPath)
                                             } else {
                                                 log { "Skip dumping." }
                                             }
@@ -1065,13 +1088,14 @@ class PackageRepository @Inject constructor(
                         // Write config
                         val tmpDir = pathUtil.getCloudTmpDir()
                         val tmpJsonPath = PathUtil.getPackageRestoreConfigDst(tmpDir)
-                        rootService.writeJson(data = packageEntity, dst = tmpJsonPath)
+                        val json = GsonBuilder().create().toJson(packageEntity)
+                        AdbService.writeText(json, tmpJsonPath)
                         cloudRepository.upload(client = client, src = tmpJsonPath, dstDir = PathUtil.getParentPath(jsonPath))
-                        rootService.deleteRecursively(tmpDir)
+                        AdbService.deleteRecursively(tmpDir)
                     }.withLog()
                 }
             }
-        }.onFailure(rootService.onFailure)
+        }
     }
 
     /**
@@ -1134,13 +1158,16 @@ class PackageRepository @Inject constructor(
                             val tmpDir = pathUtil.getCloudTmpDir()
                             var entity: MediaEntity? = null
                             cloudRepository.download(client = client, src = jsonPath, dstDir = tmpDir) { path ->
-                                entity = rootService.readJson<MediaEntity>(path).also { p ->
-                                    p?.indexInfo?.name = name
-                                    p?.indexInfo?.preserveId = if (mainBackup) 0L else preserveId
-                                    p?.extraInfo?.existed = true
-                                    p?.extraInfo?.activated = false
-                                    p?.indexInfo?.cloud = cloud
-                                    p?.indexInfo?.backupDir = cloudEntity.remote
+                                val jsonText = AdbService.readJsonText(path)
+                                if (jsonText != null) {
+                                    entity = GsonBuilder().create().fromJson<MediaEntity>(jsonText, object : TypeToken<MediaEntity>() {}.type).also { p ->
+                                        p?.indexInfo?.name = name
+                                        p?.indexInfo?.preserveId = if (mainBackup) 0L else preserveId
+                                        p?.extraInfo?.existed = true
+                                        p?.extraInfo?.activated = false
+                                        p?.indexInfo?.cloud = cloud
+                                        p?.indexInfo?.backupDir = cloudEntity.remote
+                                    }
                                 }
                                 onMsgUpdate(log { "Config is reloaded from json." })
                             }
@@ -1195,12 +1222,13 @@ class PackageRepository @Inject constructor(
                         // Write config
                         val tmpDir = pathUtil.getCloudTmpDir()
                         val tmpJsonPath = PathUtil.getMediaRestoreConfigDst(tmpDir)
-                        rootService.writeJson(data = mediaEntity, dst = tmpJsonPath)
+                        val json = GsonBuilder().create().toJson(mediaEntity)
+                        AdbService.writeText(json, tmpJsonPath)
                         cloudRepository.upload(client = client, src = tmpJsonPath, dstDir = PathUtil.getParentPath(jsonPath))
-                        rootService.deleteRecursively(tmpDir)
+                        AdbService.deleteRecursively(tmpDir)
                     }.withLog()
                 }
             }
-        }.onFailure(rootService.onFailure)
+        }
     }
 }

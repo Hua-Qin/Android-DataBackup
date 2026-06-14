@@ -1,29 +1,24 @@
 package com.xayah.core.service.util
 
 import android.content.Context
-import android.content.pm.PackageManager
 import com.xayah.core.common.util.toLineString
 import com.xayah.core.data.repository.CloudRepository
 import com.xayah.core.data.repository.PackageRepository
 import com.xayah.core.database.dao.TaskDao
 import com.xayah.core.datastore.readCompressionLevel
 import com.xayah.core.datastore.readFollowSymlinks
-import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.datastore.readSelectionType
 import com.xayah.core.model.CompressionType
 import com.xayah.core.model.DataType
 import com.xayah.core.model.OperationState
-import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.SelectionType
 import com.xayah.core.model.database.PackageEntity
 import com.xayah.core.model.database.TaskDetailPackageEntity
 import com.xayah.core.model.util.getCompressPara
 import com.xayah.core.network.client.CloudClient
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.util.IconRelativeDir
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
-import com.xayah.core.util.SymbolUtil
 import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.command.Tar
 import com.xayah.core.util.filesDir
@@ -38,7 +33,6 @@ import kotlin.coroutines.coroutineContext
 
 class PackagesBackupUtil @Inject constructor(
     @ApplicationContext val context: Context,
-    private val rootService: RemoteRootService,
     private val taskDao: TaskDao,
     private val packageRepository: PackageRepository,
     private val commonBackupUtil: CommonBackupUtil,
@@ -217,15 +211,9 @@ class PackagesBackupUtil @Inject constructor(
         ShellResult(code = if (isSuccess) 0 else -1, input = listOf(), out = out)
     }
 
-    private suspend fun getPackageSourceDir(packageName: String, userId: Int): String {
-        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
-        if (adbMode) {
-            val paths = AdbService.getPackageSourceDir(packageName)
-            return if (paths.isNotEmpty()) PathUtil.getParentPath(paths[0]) else ""
-        }
-        return rootService.getPackageSourceDir(packageName, userId).let { list ->
-            if (list.isNotEmpty()) PathUtil.getParentPath(list[0]) else ""
-        }
+    private fun getPackageSourceDir(packageName: String): String {
+        val paths = AdbService.getPackageSourceDir(packageName)
+        return if (paths.isNotEmpty()) PathUtil.getParentPath(paths[0]) else ""
     }
 
     suspend fun backupApk(p: PackageEntity, r: PackageEntity?, t: TaskDetailPackageEntity, dstDir: String): ShellResult = run {
@@ -233,22 +221,20 @@ class PackagesBackupUtil @Inject constructor(
 
         val dataType = DataType.PACKAGE_APK
         val packageName = p.packageName
-        val userId = p.userId
         val ct = p.indexInfo.compressionType
         val dst = packageRepository.getArchiveDst(dstDir = dstDir, dataType = dataType, ct = ct)
         var isSuccess: Boolean
         val out = mutableListOf<String>()
-        val srcDir = getPackageSourceDir(packageName = packageName, userId = userId)
-        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
+        val srcDir = getPackageSourceDir(packageName = packageName)
 
         if (p.getDataSelected(dataType).not()) {
             isSuccess = true
             t.updateInfo(dataType = dataType, state = OperationState.SKIP)
         } else {
             if (srcDir.isNotEmpty()) {
-                val sizeBytes = if (adbMode) AdbService.calculateSizeLong(srcDir) else rootService.calculateSize(srcDir)
+                val sizeBytes = AdbService.calculateSizeLong(srcDir)
                 t.updateInfo(dataType = dataType, state = OperationState.PROCESSING, bytes = sizeBytes)
-                val dstExists = if (adbMode) AdbService.exists(dst) else rootService.exists(dst)
+                val dstExists = AdbService.exists(dst)
                 if (dstExists && sizeBytes == r?.getDataBytes(dataType)) {
                     isSuccess = true
                     t.updateInfo(dataType = dataType, state = OperationState.SKIP)
@@ -264,7 +250,7 @@ class PackagesBackupUtil @Inject constructor(
                         out.addAll(result.out)
                         if (result.isSuccess) {
                             p.setDataBytes(dataType, sizeBytes)
-                            p.setDisplayBytes(dataType, if (adbMode) AdbService.calculateSizeLong(dst) else rootService.calculateSize(dst))
+                            p.setDisplayBytes(dataType, AdbService.calculateSizeLong(dst))
                         }
                     }
                 }
@@ -284,114 +270,27 @@ class PackagesBackupUtil @Inject constructor(
     suspend fun backupData(p: PackageEntity, t: TaskDetailPackageEntity, r: PackageEntity?, dataType: DataType, dstDir: String): ShellResult = run {
         log { "Backing up ${dataType.type}..." }
 
-        val packageName = p.packageName
-        val userId = p.userId
-        val ct = p.indexInfo.compressionType
-        val dst = packageRepository.getArchiveDst(dstDir = dstDir, dataType = dataType, ct = ct)
-        var isSuccess: Boolean
         val out = mutableListOf<String>()
-        val srcDir = packageRepository.getDataSrcDir(dataType, userId)
-        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
 
         if (p.getDataSelected(dataType).not()) {
-            isSuccess = true
             t.updateInfo(dataType = dataType, state = OperationState.SKIP)
-        } else if (adbMode) {
+        } else {
             // ADB 模式下不支持用户数据备份
-            isSuccess = false
             out.add(log { "User data backup is not supported in ADB mode." })
             t.updateInfo(dataType = dataType, state = OperationState.ERROR, log = out.toLineString())
-        } else {
-            // Check the existence of origin path.
-            val src = packageRepository.getDataSrc(srcDir, packageName)
-            rootService.exists(src).also {
-                if (it.not()) {
-                    if (dataType == DataType.PACKAGE_USER) {
-                        isSuccess = false
-                        out.add(log { "Not exist: $src" })
-                        t.updateInfo(dataType = dataType, state = OperationState.ERROR, log = out.toLineString())
-                        return@run ShellResult(code = -1, input = listOf(), out = out)
-                    } else {
-                        out.add(log { "Not exist and skip: $src" })
-                        t.updateInfo(dataType = dataType, state = OperationState.SKIP, log = out.toLineString())
-                        return@run ShellResult(code = -2, input = listOf(), out = out)
-                    }
-                }
-            }
-
-            // Generate exclusion items.
-            val exclusionList = mutableListOf<String>()
-            when (dataType) {
-                DataType.PACKAGE_USER, DataType.PACKAGE_USER_DE -> {
-                    // Exclude cache
-                    val folders = listOf(".ota", "cache", "lib", "code_cache", "no_backup")
-                    exclusionList.addAll(folders.map { "${SymbolUtil.QUOTE}$packageName/$it${SymbolUtil.QUOTE}" })
-                }
-
-                DataType.PACKAGE_DATA, DataType.PACKAGE_OBB, DataType.PACKAGE_MEDIA -> {
-                    // Exclude cache
-                    val folders = listOf("cache")
-                    exclusionList.addAll(folders.map { "${SymbolUtil.QUOTE}$packageName/$it${SymbolUtil.QUOTE}" })
-                    // Exclude Backup_*
-                    exclusionList.add("${SymbolUtil.QUOTE}Backup_${SymbolUtil.QUOTE}*")
-                }
-
-                else -> {}
-            }
-            log { "ExclusionList: $exclusionList." }
-
-            val sizeBytes = rootService.calculateSize(src)
-            t.updateInfo(dataType = dataType, state = OperationState.PROCESSING, bytes = sizeBytes)
-            if (rootService.exists(dst) && sizeBytes == r?.getDataBytes(dataType)) {
-                isSuccess = true
-                t.updateInfo(dataType = dataType, state = OperationState.SKIP)
-                out.add(log { "Data has not changed." })
-            } else {
-                // Compress and test.
-                Tar.compress(
-                    exclusionList = exclusionList,
-                    h = if (context.readFollowSymlinks().first()) "-h" else "",
-                    srcDir = srcDir,
-                    src = packageName,
-                    dst = dst,
-                    extra = ct.getCompressPara(context.readCompressionLevel().first())
-                ).also { result ->
-                    isSuccess = result.isSuccess
-                    out.addAll(result.out)
-                }
-                commonBackupUtil.testArchive(src = dst, ct = ct).also { result ->
-                    isSuccess = isSuccess && result.isSuccess
-                    out.addAll(result.out)
-                    if (result.isSuccess) {
-                        p.setDataBytes(dataType, sizeBytes)
-                        p.setDisplayBytes(dataType, rootService.calculateSize(dst))
-                    }
-                }
-            }
-
-            t.updateInfo(dataType = dataType, state = if (isSuccess) OperationState.DONE else OperationState.ERROR, log = out.toLineString())
         }
 
-        ShellResult(code = if (isSuccess) 0 else -1, input = listOf(), out = out)
+        ShellResult(code = -1, input = listOf(), out = out)
     }
 
     suspend fun backupPermissions(p: PackageEntity) = run {
         log { "Backing up permissions..." }
 
         val packageName = p.packageName
-        val userId = p.userId
-        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
 
-        if (adbMode) {
-            // ADB 模式下使用 AdbService 获取权限
-            p.extraInfo.permissions = AdbService.getPermissions(packageName).map {
-                com.xayah.core.model.database.PackagePermission(name = it)
-            }
-        } else {
-            val packageInfo = rootService.getPackageInfoAsUser(packageName, PackageManager.GET_PERMISSIONS, userId)
-            packageInfo?.apply {
-                p.extraInfo.permissions = rootService.getPermissions(packageInfo = this)
-            }
+        // ADB 模式下使用 AdbService 获取权限
+        p.extraInfo.permissions = AdbService.getPermissions(packageName).map {
+            com.xayah.core.model.database.PackagePermission(name = it)
         }
         val permissions = p.extraInfo.permissions
         log { "Permissions size: ${permissions.size}..." }
@@ -403,20 +302,9 @@ class PackagesBackupUtil @Inject constructor(
     suspend fun backupSsaid(p: PackageEntity) = run {
         log { "Backing up ssaid..." }
 
-        val adbMode = context.readPermissionMode().first() == PermissionMode.ADB
-        if (adbMode) {
-            // ADB 模式下无法获取 SSAID（需要读取 /data/system/packages.xml）
-            log { "SSAID backup skipped in ADB mode." }
-            p.extraInfo.ssaid = ""
-        } else {
-            val packageName = p.packageName
-            val uid = p.extraInfo.uid
-            val userId = p.userId
-
-            val ssaid = rootService.getPackageSsaidAsUser(packageName = packageName, uid = uid, userId = userId)
-            log { "Ssaid: $ssaid" }
-            p.extraInfo.ssaid = ssaid
-        }
+        // ADB 模式下无法获取 SSAID（需要读取 /data/system/packages.xml）
+        log { "SSAID backup skipped in ADB mode." }
+        p.extraInfo.ssaid = ""
     }
 
     suspend fun upload(client: CloudClient, p: PackageEntity, t: TaskDetailPackageEntity, dataType: DataType, srcDir: String, dstDir: String) = run {

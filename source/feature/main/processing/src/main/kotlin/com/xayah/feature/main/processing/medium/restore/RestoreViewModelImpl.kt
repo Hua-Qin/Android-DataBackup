@@ -11,7 +11,6 @@ import com.xayah.core.model.StorageMode
 import com.xayah.core.model.database.MediaEntity
 import com.xayah.core.model.util.formatSize
 import com.xayah.core.network.client.getCloud
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.medium.restore.ProcessingServiceProxyCloudImpl
 import com.xayah.core.service.medium.restore.ProcessingServiceProxyLocalImpl
 import com.xayah.core.ui.material3.SnackbarDuration
@@ -44,14 +43,13 @@ import javax.inject.Inject
 @HiltViewModel
 class RestoreViewModelImpl @Inject constructor(
     @ApplicationContext private val mContext: Context,
-    private val mRootService: RemoteRootService,
     mTaskRepo: TaskRepository,
     private val mMediaRepo: MediaRepository,
     private val mCloudRepo: CloudRepository,
     mLocalService: ProcessingServiceProxyLocalImpl,
     mCloudService: ProcessingServiceProxyCloudImpl,
     private val args: SavedStateHandle,
-) : AbstractMediumProcessingViewModel(mContext, mRootService, mTaskRepo, mLocalService, mCloudService) {
+) : AbstractMediumProcessingViewModel(mContext, mTaskRepo, mLocalService, mCloudService) {
     override suspend fun onOtherEvent(state: IndexUiState, intent: ProcessingUiIntent) {
         when (intent) {
             is UpdateFiles -> {

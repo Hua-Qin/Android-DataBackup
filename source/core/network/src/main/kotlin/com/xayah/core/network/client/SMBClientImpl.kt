@@ -25,7 +25,6 @@ import com.xayah.core.model.database.SMBExtra
 import com.xayah.core.network.R
 import com.xayah.core.network.io.CountingOutputStreamImpl
 import com.xayah.core.network.util.getExtraEntity
-import com.xayah.core.rootservice.parcelables.PathParcelable
 import com.xayah.core.util.GsonUtil
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
@@ -323,22 +322,22 @@ class SMBClientImpl(private val entity: CloudEntity, private val extra: SMBExtra
         return DirChildrenParcelable(files = files, directories = directories)
     }
 
-    override fun walkFileTree(src: String): List<PathParcelable> {
-        val pathParcelableList = mutableListOf<PathParcelable>()
+    override fun walkFileTree(src: String): List<String> {
+        val pathList = mutableListOf<String>()
         withDiskShare { diskShare ->
             if (diskShare.folderExists(src)) {
                 val files = listFiles("/${shareName}/$src")
                 for (i in files.files) {
-                    pathParcelableList.add(PathParcelable("${src}/${i.name}"))
+                    pathList.add("${src}/${i.name}")
                 }
                 for (i in files.directories) {
-                    pathParcelableList.addAll(walkFileTree("${src}/${i.name}"))
+                    pathList.addAll(walkFileTree("${src}/${i.name}"))
                 }
             } else if (diskShare.fileExists(src)) {
-                pathParcelableList.add(PathParcelable(src))
+                pathList.add(src)
             }
         }
-        return pathParcelableList
+        return pathList
     }
 
     /**

@@ -43,7 +43,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.xayah.core.datastore.saveScreenOffCountDown
 import com.xayah.core.model.OperationState
 import com.xayah.core.ui.component.AnimatedTextContainer
 import com.xayah.core.ui.component.BodyLargeText
@@ -58,9 +57,8 @@ import com.xayah.core.ui.component.paddingBottom
 import com.xayah.core.ui.component.paddingHorizontal
 import com.xayah.core.ui.component.paddingTop
 import com.xayah.core.ui.component.paddingVertical
-import com.xayah.core.ui.material3.SnackbarDuration
-import com.xayah.core.ui.material3.SnackbarType
 import com.xayah.core.ui.route.MainRoutes
+import com.xayah.core.ui.viewmodel.IndexUiEffect
 import com.xayah.core.ui.theme.ThemedColorSchemeKeyTokens
 import com.xayah.core.ui.theme.value
 import com.xayah.core.ui.token.AnimationTokens
@@ -71,7 +69,6 @@ import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.navigateSingle
 import com.xayah.core.util.withMainContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalAnimationGraphicsApi::class)
 @SuppressLint("StringFormatInvalid")
@@ -106,39 +103,8 @@ fun PageProcessing(
                 -1f
         )
     }
-    val screenOffCountDown by viewModel.screenOffCountDown.collectAsStateWithLifecycle()
-
     LaunchedEffect(null) {
         viewModel.emitIntentOnIO(ProcessingUiIntent.Initialize)
-    }
-
-    LaunchedEffect(screenOffCountDown, uiState.state) {
-        viewModel.launchOnIO {
-            if (screenOffCountDown != 0) {
-                if (uiState.state != OperationState.PROCESSING) {
-                    context.saveScreenOffCountDown(0)
-                } else {
-                    viewModel.launchOnIO {
-                        viewModel.emitEffect(IndexUiEffect.DismissSnackbar)
-                        viewModel.emitEffect(
-                            IndexUiEffect.ShowSnackbar(
-                                type = SnackbarType.Success,
-                                message = context.getString(R.string.args_screen_off_in_seconds, screenOffCountDown),
-                                duration = SnackbarDuration.Indefinite
-                            )
-                        )
-                    }
-                    var count = screenOffCountDown
-                    while (count != 0) {
-                        delay(1000)
-                        count--
-                    }
-                    viewModel.emitEffectOnIO(IndexUiEffect.DismissSnackbar)
-                    context.saveScreenOffCountDown(count)
-                    viewModel.emitIntent(ProcessingUiIntent.TurnOffScreen)
-                }
-            }
-        }
     }
 
     val onBack: () -> Unit = remember {

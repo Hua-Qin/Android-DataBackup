@@ -6,7 +6,6 @@ import com.xayah.core.model.KillAppOption
 import com.xayah.core.model.LZ4_SUFFIX
 import com.xayah.core.model.OpType
 import com.xayah.core.model.OperationState
-import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.SFTPAuthMode
 import com.xayah.core.model.SelectionType
 import com.xayah.core.model.SmbAuthMode
@@ -84,9 +83,6 @@ fun KillAppOption.Companion.indexOf(index: Int): KillAppOption = when (index) {
 
 fun KillAppOption.Companion.of(name: String?): KillAppOption =
     runCatching { KillAppOption.valueOf(name!!.uppercase()) }.getOrDefault(KillAppOption.OPTION_II)
-
-fun PermissionMode.Companion.of(name: String?): PermissionMode =
-    runCatching { PermissionMode.valueOf(name!!.uppercase()) }.getOrDefault(PermissionMode.ROOT)
 
 fun Info.set(
     bytes: Long? = null,

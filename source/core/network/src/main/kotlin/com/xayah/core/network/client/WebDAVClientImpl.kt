@@ -6,7 +6,6 @@ import com.xayah.core.model.database.CloudEntity
 import com.xayah.core.model.database.WebDAVExtra
 import com.xayah.core.network.R
 import com.xayah.core.network.util.getExtraEntity
-import com.xayah.core.rootservice.parcelables.PathParcelable
 import com.xayah.core.util.GsonUtil
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
@@ -174,29 +173,29 @@ class WebDAVClientImpl(private val entity: CloudEntity, private val extra: WebDA
         return DirChildrenParcelable(files = files, directories = directories)
     }
 
-    private fun walkFileTreeRecursively(src: String): List<PathParcelable> {
-        val pathParcelableList = mutableListOf<PathParcelable>()
+    private fun walkFileTreeRecursively(src: String): List<String> {
+        val pathList = mutableListOf<String>()
         val files = listFiles(src)
         for (i in files.files) {
-            pathParcelableList.add(PathParcelable("${src}/${i.name}"))
+            pathList.add("${src}/${i.name}")
         }
         for (i in files.directories) {
-            pathParcelableList.addAll(walkFileTreeRecursively("${src}/${i.name}"))
+            pathList.addAll(walkFileTreeRecursively("${src}/${i.name}"))
         }
-        return pathParcelableList
+        return pathList
     }
 
-    override fun walkFileTree(src: String): List<PathParcelable> {
-        val pathParcelableList = mutableListOf<PathParcelable>()
+    override fun walkFileTree(src: String): List<String> {
+        val pathList = mutableListOf<String>()
         withClient { client ->
             val srcFile = client.list(getPath(src))[0]
             if (srcFile.isDirectory) {
-                pathParcelableList.addAll(walkFileTreeRecursively(src))
+                pathList.addAll(walkFileTreeRecursively(src))
             } else {
-                pathParcelableList.add(PathParcelable(src))
+                pathList.add(src)
             }
         }
-        return pathParcelableList
+        return pathList
     }
 
     override fun exists(src: String): Boolean = runCatching { withClient { client -> client.list(getPath(src)) } }.isSuccess

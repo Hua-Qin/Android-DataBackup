@@ -27,9 +27,6 @@ dependencies {
     // Preferences DataStore
     implementation(libs.androidx.datastore.preferences)
 
-    // libsu
-    implementation(libs.libsu.core)
-
     // Shizuku
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)

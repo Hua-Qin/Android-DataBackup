@@ -7,14 +7,13 @@ import com.xayah.core.datastore.ConstantUtil
 import com.xayah.core.model.OpType
 import com.xayah.core.model.ProcessingType
 import com.xayah.core.model.TaskType
-import com.xayah.core.rootservice.service.RemoteRootService
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.localBackupSaveDir
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 
 class TaskRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val rootService: RemoteRootService,
     private val packageDao: PackageDao,
     private val taskDao: TaskDao,
 ) {
@@ -50,11 +49,13 @@ class TaskRepository @Inject constructor(
         var total = 0.0
         total += when (opType) {
             OpType.BACKUP -> {
-                rootService.readStatFs(context.localBackupSaveDir()).availableBytes.toDouble()
+                val (availableBytes, _) = AdbService.readStatFs(context.localBackupSaveDir())
+                availableBytes.toDouble()
             }
 
             OpType.RESTORE -> {
-                rootService.readStatFs(ConstantUtil.DEFAULT_PATH_PARENT).availableBytes.toDouble()
+                val (availableBytes, _) = AdbService.readStatFs(ConstantUtil.DEFAULT_PATH_PARENT)
+                availableBytes.toDouble()
             }
         }
         total
@@ -64,11 +65,13 @@ class TaskRepository @Inject constructor(
         var total = 0.0
         total += when (opType) {
             OpType.BACKUP -> {
-                rootService.readStatFs(context.localBackupSaveDir()).totalBytes.toDouble()
+                val (_, totalBytes) = AdbService.readStatFs(context.localBackupSaveDir())
+                totalBytes.toDouble()
             }
 
             OpType.RESTORE -> {
-                rootService.readStatFs(ConstantUtil.DEFAULT_PATH_PARENT).totalBytes.toDouble()
+                val (_, totalBytes) = AdbService.readStatFs(ConstantUtil.DEFAULT_PATH_PARENT)
+                totalBytes.toDouble()
             }
         }
         total

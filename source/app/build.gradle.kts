@@ -119,7 +119,6 @@ dependencies {
     implementation(project(":core:util"))
     implementation(project(":core:work"))
     compileOnly(project(":core:hiddenapi"))
-    implementation(project(":core:rootservice"))
 
     // Feature
     implementation(project(":feature:crash"))
@@ -145,9 +144,6 @@ dependencies {
     // Compose Navigation
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.hilt.navigation.compose)
-
-    // libsu
-    implementation(libs.libsu.core)
 
     // Shizuku
     implementation(libs.shizuku.api)

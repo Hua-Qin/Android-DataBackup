@@ -7,9 +7,9 @@ import com.xayah.core.datastore.readCloudActivatedAccountName
 import com.xayah.core.model.database.CloudEntity
 import com.xayah.core.network.client.CloudClient
 import com.xayah.core.network.client.getCloud
-import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.PathUtil
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.model.ShellResult
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -20,7 +20,6 @@ import javax.inject.Inject
 
 class CloudRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val rootService: RemoteRootService,
     private val cloudDao: CloudDao,
 ) {
     private fun log(msg: () -> String): String = run {
@@ -57,7 +56,7 @@ class CloudRepository @Inject constructor(
                 out.add(log { stringWriter.toString() })
         }
 
-        rootService.deleteRecursively(src).also { result ->
+        AdbService.deleteRecursively(src).also { result ->
             isSuccess = isSuccess and result
             if (result.not()) out.add(log { "Failed to delete $src." })
         }
@@ -78,8 +77,8 @@ class CloudRepository @Inject constructor(
 
             var code = 0
             val out = mutableListOf<String>()
-            rootService.deleteRecursively(dstDir)
-            rootService.mkdirs(dstDir)
+            AdbService.deleteRecursively(dstDir)
+            AdbService.mkdirs(dstDir)
             PathUtil.setFilesDirSELinux(context)
 
             runCatching {
@@ -96,7 +95,7 @@ class CloudRepository @Inject constructor(
                 out.add(log { "Failed to download $src." })
             }
             if (deleteAfterDownloaded)
-                rootService.deleteRecursively(dstDir).also { result ->
+                AdbService.deleteRecursively(dstDir).also { result ->
                     code = if (result) code else -1
                     if (result.not()) out.add(log { "Failed to delete $dstDir." })
                 }

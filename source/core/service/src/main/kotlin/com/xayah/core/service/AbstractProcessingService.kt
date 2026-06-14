@@ -8,28 +8,24 @@ import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
-import android.view.SurfaceControlHidden
 import com.xayah.core.data.repository.TaskRepository
 import com.xayah.core.database.dao.TaskDao
 import com.xayah.core.datastore.ConstantUtil.DEFAULT_IDLE_TIMEOUT
 import com.xayah.core.datastore.readAutoScreenOff
-import com.xayah.core.datastore.readPermissionMode
 import com.xayah.core.datastore.readScreenOffTimeout
 import com.xayah.core.datastore.saveScreenOffCountDown
 import com.xayah.core.datastore.saveScreenOffTimeout
 import com.xayah.core.model.OperationState
-import com.xayah.core.model.PermissionMode
 import com.xayah.core.model.database.ProcessingInfoEntity
 import com.xayah.core.model.database.TaskEntity
 import com.xayah.core.model.util.set
-import com.xayah.core.rootservice.service.RemoteRootService
-import com.xayah.core.rootservice.util.withIOContext
 import com.xayah.core.service.util.CommonBackupUtil
 import com.xayah.core.util.DateUtil
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.NotificationUtil
 import com.xayah.core.util.PathUtil
 import com.xayah.core.util.adb.AdbService
+import com.xayah.core.util.withIOContext
 import com.xayah.core.util.withLog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -56,7 +52,7 @@ internal abstract class AbstractProcessingService : Service() {
         msg
     }
 
-    protected suspend fun runCatchingOnService(block: suspend () -> Unit): Boolean = runCatching { block() }.onFailure { mRootService.onFailure(it) }.withLog().isSuccess
+    protected suspend fun runCatchingOnService(block: suspend () -> Unit): Boolean = runCatching { block() }.onFailure { LogUtil.log { mTAG to it.stackTraceToString() } }.withLog().isSuccess
 
     protected suspend fun ProcessingInfoEntity.update(
         bytes: Long? = null,
@@ -118,7 +114,6 @@ internal abstract class AbstractProcessingService : Service() {
     private val mMutex = Mutex()
     protected val mContext: Context by lazy { applicationContext }
     protected abstract val mTAG: String
-    protected abstract val mRootService: RemoteRootService
     protected abstract val mPathUtil: PathUtil
     protected abstract val mCommonBackupUtil: CommonBackupUtil
     protected abstract val mTaskDao: TaskDao
@@ -159,14 +154,9 @@ internal abstract class AbstractProcessingService : Service() {
             beforePreprocessing()
 
             if (mContext.readAutoScreenOff().first()) {
-                val adbMode = mContext.readPermissionMode().first() == PermissionMode.ADB
-                if (adbMode) {
-                    val result = AdbService.getSettings("system", "screen_off_timeout")
-                    val timeout = result.outString.trim().toIntOrNull() ?: DEFAULT_IDLE_TIMEOUT
-                    mContext.saveScreenOffTimeout(timeout)
-                } else {
-                    mContext.saveScreenOffTimeout(mRootService.getScreenOffTimeout())
-                }
+                val result = AdbService.getSettings("system", "screen_off_timeout")
+                val timeout = result.outString.trim().toIntOrNull() ?: DEFAULT_IDLE_TIMEOUT
+                mContext.saveScreenOffTimeout(timeout)
                 mContext.saveScreenOffCountDown(3)
             }
 
@@ -204,16 +194,8 @@ internal abstract class AbstractProcessingService : Service() {
                 mTaskEntity.update(postProcessingIndex = mTaskEntity.postProcessingIndex + 1)
             }
 
-            val adbMode = mContext.readPermissionMode().first() == PermissionMode.ADB
-            if (adbMode) {
-                AdbService.putSettings("system", "screen_off_timeout", mContext.readScreenOffTimeout().first().toString())
-            } else {
-                mRootService.setScreenOffTimeout(mContext.readScreenOffTimeout().first())
-            }
+            AdbService.putSettings("system", "screen_off_timeout", mContext.readScreenOffTimeout().first().toString())
             mContext.saveScreenOffTimeout(DEFAULT_IDLE_TIMEOUT)
-            if (!adbMode) {
-                mRootService.setDisplayPowerMode(SurfaceControlHidden.POWER_MODE_NORMAL)
-            }
 
             mEndTimestamp = DateUtil.getTimestamp()
             afterPostProcessing()

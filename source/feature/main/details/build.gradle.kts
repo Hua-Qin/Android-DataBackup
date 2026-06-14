@@ -16,7 +16,6 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:data"))
     compileOnly(project(":core:hiddenapi"))
-    implementation(project(":core:rootservice"))
 
     // Hilt navigation
     implementation(libs.androidx.hilt.navigation.compose)

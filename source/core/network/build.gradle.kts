@@ -13,7 +13,6 @@ dependencies {
     implementation(project(":core:util"))
     implementation(project(":core:database"))
     implementation(project(":core:model"))
-    implementation(project(":core:rootservice"))
 
     // OkHttp
     implementation(libs.okhttp)
