@@ -204,12 +204,12 @@ class FilesRepo @Inject constructor(
             if (client.exists(src)) {
                 val paths = client.walkFileTree(src)
                 val tmpDir = pathUtil.getCloudTmpDir()
-                paths.forEachIndexed { index, pathParcelable ->
-                    val fileName = PathUtil.getFileName(pathParcelable.pathString)
+                paths.forEachIndexed { index, pathString ->
+                    val fileName = PathUtil.getFileName(pathString)
                     onLoad(index, paths.size, fileName)
                     if (fileName == ConfigsMediaRestoreName) {
                         runCatching {
-                            cloudRepo.download(client = client, src = pathParcelable.pathString, dstDir = tmpDir) { path ->
+                            cloudRepo.download(client = client, src = pathString, dstDir = tmpDir) { path ->
                                 val jsonText = AdbService.readJsonText(path)
                                 if (jsonText != null) {
                                     val p = GsonBuilder().create().fromJson<MediaEntity>(jsonText, object : TypeToken<MediaEntity>() {}.type)

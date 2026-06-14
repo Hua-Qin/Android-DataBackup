@@ -32,6 +32,7 @@ import com.xayah.core.util.command.BaseUtil
 import com.xayah.core.util.command.Tar
 import com.xayah.core.util.iconDir
 import com.xayah.core.util.localBackupSaveDir
+import com.xayah.core.util.toPathList
 import com.xayah.core.util.withLog
 import com.google.gson.GsonBuilder
 import com.google.gson.reflect.TypeToken
@@ -653,7 +654,7 @@ class PackageRepository @Inject constructor(
                                         Tar.decompress(src = archivePathString, dst = tmpApkPath, extra = type.decompressPara)
                                         AdbService.listFilePaths(tmpApkPath).also { apkPathList ->
                                             if (apkPathList.isNotEmpty()) {
-                                                context.packageManager.getPackageArchiveInfo(apkPathList.first())?.apply {
+                                                context.packageManager.getPackageArchiveInfo(apkPathList.first(), 0)?.apply {
                                                     packageEntity.packageInfo.label = applicationInfo?.loadLabel(packageManager).toString()
                                                     packageEntity.packageInfo.versionName = versionName ?: ""
                                                     packageEntity.packageInfo.versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -877,20 +878,21 @@ class PackageRepository @Inject constructor(
 
                 // Classify the paths
                 pathList.forEach { path ->
-                    log { "Classifying: ${path.pathString}" }
+                    log { "Classifying: $path" }
                     runCatching {
-                        val pathListSize = path.pathList.size
-                        val packageName = path.pathList[pathListSize - 3]
+                        val pathParts = path.toPathList()
+                        val pathListSize = pathParts.size
+                        val packageName = pathParts[pathListSize - 3]
                         val preserveId: Long
                         val userId: Int
-                        if (path.pathList[pathListSize - 2].contains("@")) {
-                            val userIdWithPreserveId = path.pathList[pathListSize - 2].split("@")
+                        if (pathParts[pathListSize - 2].contains("@")) {
+                            val userIdWithPreserveId = pathParts[pathListSize - 2].split("@")
                             preserveId = userIdWithPreserveId.lastOrNull()?.toLongOrNull() ?: 0
                             userId = userIdWithPreserveId.first().split("_").lastOrNull()?.toIntOrNull() ?: 0
                         } else {
                             // Main backup
                             preserveId = -1L
-                            userId = path.pathList[pathListSize - 2].split("_").lastOrNull()?.toIntOrNull() ?: 0
+                            userId = pathParts[pathListSize - 2].split("_").lastOrNull()?.toIntOrNull() ?: 0
                         }
                         typedPathSet.add("$packageName@$preserveId@$userId")
                         log { "packageName: $packageName, preserveId: $preserveId, userId: $userId" }
@@ -989,12 +991,15 @@ class PackageRepository @Inject constructor(
 
                         archives.forEach { archivePath ->
                             // For each archive
-                            log { "Package archive: ${archivePath.pathString}" }
+                            log { "Package archive: $archivePath" }
                             runCatching {
-                                when (archivePath.nameWithoutExtension) {
+                                val archiveFileName = PathUtil.getFileName(archivePath)
+                                val nameWithoutExtension = archiveFileName.substringBeforeLast(".", "")
+                                val extension = archiveFileName.substringAfterLast(".", "")
+                                when (nameWithoutExtension) {
                                     DataType.PACKAGE_APK.type -> {
                                         onMsgUpdate(log { "Dumping apk..." })
-                                        val type = CompressionType.suffixOf(archivePath.extension)
+                                        val type = CompressionType.suffixOf(extension)
                                         if (type != null) {
                                             log { "Archive compression type: ${type.type}" }
                                             packageEntity.indexInfo.compressionType = type
@@ -1005,11 +1010,11 @@ class PackageRepository @Inject constructor(
                                                 AdbService.deleteRecursively(tmpApkPath)
                                                 AdbService.mkdirs(tmpApkPath)
                                                 val tmpDir = pathUtil.getCloudTmpDir()
-                                                cloudRepository.download(client = client, src = archivePath.pathString, dstDir = tmpDir) { path ->
+                                                cloudRepository.download(client = client, src = archivePath, dstDir = tmpDir) { path ->
                                                     Tar.decompress(src = path, dst = tmpApkPath, extra = type.decompressPara)
                                                     AdbService.listFilePaths(tmpApkPath).also { apkPathList ->
                                                         if (apkPathList.isNotEmpty()) {
-                                                            context.packageManager.getPackageArchiveInfo(apkPathList.first())?.apply {
+                                                            context.packageManager.getPackageArchiveInfo(apkPathList.first(), 0)?.apply {
                                                                 packageEntity.packageInfo.label = applicationInfo?.loadLabel(packageManager).toString()
                                                                 packageEntity.packageInfo.versionName = versionName ?: ""
                                                                 packageEntity.packageInfo.versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -1040,26 +1045,26 @@ class PackageRepository @Inject constructor(
                                                 log { "Skip dumping." }
                                             }
                                         } else {
-                                            log { "Failed to parse compression type: ${archivePath.extension}" }
+                                            log { "Failed to parse compression type: $extension" }
                                         }
                                     }
 
                                     DataType.PACKAGE_USER.type -> {
                                         onMsgUpdate(log { "Dumping user..." })
-                                        val type = CompressionType.suffixOf(archivePath.extension)
+                                        val type = CompressionType.suffixOf(extension)
                                         if (type != null) {
                                             log { "Archive compression type: ${type.type}" }
                                             packageEntity.indexInfo.compressionType = type
                                             packageEntity.dataStates.userState = DataState.Selected
                                         } else {
-                                            log { "Failed to parse compression type: ${archivePath.extension}" }
+                                            log { "Failed to parse compression type: $extension" }
                                         }
                                     }
 
                                     DataType.PACKAGE_USER_DE.type, DataType.PACKAGE_DATA.type, DataType.PACKAGE_OBB.type, DataType.PACKAGE_MEDIA.type -> {
-                                        onMsgUpdate(log { "Dumping ${archivePath.nameWithoutExtension}..." })
+                                        onMsgUpdate(log { "Dumping $nameWithoutExtension..." })
 
-                                        when (archivePath.nameWithoutExtension) {
+                                        when (nameWithoutExtension) {
                                             DataType.PACKAGE_USER_DE.type -> {
                                                 dataStates.userDeState = DataState.Selected
                                             }
@@ -1113,19 +1118,20 @@ class PackageRepository @Inject constructor(
 
                 // Classify the paths
                 pathList.forEach { path ->
-                    log { "Classifying: ${path.pathString}" }
+                    log { "Classifying: $path" }
                     runCatching {
-                        val pathListSize = path.pathList.size
+                        val pathParts = path.toPathList()
+                        val pathListSize = pathParts.size
                         val name: String
                         val preserveId: Long
-                        if (path.pathList[pathListSize - 2].contains("@")) {
-                            val nameWithPreserveId = path.pathList[pathListSize - 2].split("@")
+                        if (pathParts[pathListSize - 2].contains("@")) {
+                            val nameWithPreserveId = pathParts[pathListSize - 2].split("@")
                             preserveId = nameWithPreserveId.lastOrNull()?.toLongOrNull() ?: 0
                             name = nameWithPreserveId.first()
                         } else {
                             // Main backup
                             preserveId = -1L
-                            name = path.pathList[pathListSize - 2]
+                            name = pathParts[pathListSize - 2]
                         }
                         typedPathSet.add("$name@$preserveId")
                         log { "name: $name, preserveId: $preserveId" }
@@ -1199,18 +1205,21 @@ class PackageRepository @Inject constructor(
 
                         archives.forEach { archivePath ->
                             // For each archive
-                            log { "Media archive: ${archivePath.pathString}" }
+                            log { "Media archive: $archivePath" }
                             runCatching {
-                                when (archivePath.nameWithoutExtension) {
+                                val archiveFileName = PathUtil.getFileName(archivePath)
+                                val nameWithoutExtension = archiveFileName.substringBeforeLast(".", "")
+                                val extension = archiveFileName.substringAfterLast(".", "")
+                                when (nameWithoutExtension) {
                                     DataType.PACKAGE_USER.type -> {
                                         onMsgUpdate(log { "Dumping media..." })
-                                        val type = CompressionType.suffixOf(archivePath.extension)
+                                        val type = CompressionType.suffixOf(extension)
                                         if (type != null) {
                                             log { "Archive compression type: ${type.type}" }
                                             mediaEntity.indexInfo.compressionType = type
                                             mediaEntity.extraInfo.existed = true
                                         } else {
-                                            log { "Failed to parse compression type: ${archivePath.extension}" }
+                                            log { "Failed to parse compression type: $extension" }
                                         }
                                     }
 

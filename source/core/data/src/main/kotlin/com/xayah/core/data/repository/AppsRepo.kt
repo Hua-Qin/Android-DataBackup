@@ -27,6 +27,7 @@ import com.xayah.core.model.DefaultPreserveId
 import com.xayah.core.model.OpType
 import com.xayah.core.model.SettingsData
 import kotlinx.coroutines.runBlocking
+import com.xayah.core.hiddenapi.castTo
 import com.xayah.core.model.UserInfo
 import com.xayah.core.model.database.LabelAppCrossRefEntity
 import com.xayah.core.model.database.PackageDataStates
@@ -555,12 +556,12 @@ class AppsRepo @Inject constructor(
             if (client.exists(path)) {
                 val paths = client.walkFileTree(path)
                 val tmpDir = pathUtil.getCloudTmpDir()
-                paths.forEachIndexed { index, pathParcelable ->
-                    val fileName = PathUtil.getFileName(pathParcelable.pathString)
+                paths.forEachIndexed { index, pathString ->
+                    val fileName = PathUtil.getFileName(pathString)
                     onLoad(index, paths.size, fileName)
                     if (fileName == ConfigsPackageRestoreName) {
                         runCatching {
-                            cloudRepo.download(client = client, src = pathParcelable.pathString, dstDir = tmpDir) { path ->
+                            cloudRepo.download(client = client, src = pathString, dstDir = tmpDir) { path ->
                                 val jsonText = AdbService.readJsonText(path)
                                 if (jsonText != null) {
                                     val p = GsonBuilder().create().fromJson<PackageEntity>(jsonText, object : TypeToken<PackageEntity>() {}.type)
@@ -568,7 +569,7 @@ class AppsRepo @Inject constructor(
                                     p?.extraInfo?.activated = false
                                     p?.indexInfo?.cloud = entity.name
                                     p?.indexInfo?.backupDir = remote
-                                    parsePreserveAndUserId(pathParcelable.pathString).also { result ->
+                                    parsePreserveAndUserId(pathString).also { result ->
                                         result?.also { (pId, uId) ->
                                             p?.indexInfo?.preserveId = pId
                                             p?.indexInfo?.userId = uId
@@ -625,8 +626,7 @@ class AppsRepo @Inject constructor(
      */
     suspend fun launchApp(packageName: String, userId: Int) {
         val launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
-        val userHandle = android.os.Process.getUserHandle(userId)
-            ?: throw SecurityException("Cannot get UserHandle for userId=$userId")
+        val userHandle = android.os.UserHandleHidden.of(userId)
         if (launcherApps.isPackageEnabled(packageName, userHandle).not()) {
             // Package not enabled
             withMainContext {
