@@ -28,4 +28,7 @@ dependencies {
 
     // PickYou
     implementation(libs.pickyou)
+
+    // Gson
+    implementation(libs.gson)
 }
