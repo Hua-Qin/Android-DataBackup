@@ -8,6 +8,7 @@ import android.graphics.drawable.Drawable
 import androidx.core.graphics.drawable.toBitmap
 import androidx.core.graphics.drawable.toDrawable
 import com.xayah.core.common.util.trim
+import com.xayah.core.util.BinArchiveName
 import com.xayah.core.util.LogUtil
 import com.xayah.core.util.LogUtil.TAG_SHELL_CODE
 import com.xayah.core.util.LogUtil.TAG_SHELL_IN
@@ -16,10 +17,12 @@ import com.xayah.core.util.LogUtil.log
 import com.xayah.core.util.SymbolUtil.QUOTE
 import com.xayah.core.util.SymbolUtil.USD
 import com.xayah.core.util.adb.AdbService
+import com.xayah.core.util.binArchivePath
+import com.xayah.core.util.binDir
+import com.xayah.core.util.filesDir
+import com.xayah.core.util.logDir
 import com.xayah.core.util.model.ShellResult
 import com.xayah.core.util.withIOContext
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import net.lingala.zip4j.ZipFile
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -28,7 +31,7 @@ import java.io.FileOutputStream
 object BaseUtil {
     suspend fun initializeEnvironment(context: Context) = run {
         // Set up LogUtil.
-        LogUtil.initialize(context, com.xayah.core.util.logDir())
+        LogUtil.initialize(context, context.logDir())
     }
 
     suspend fun execute(vararg args: String, log: Boolean = true): ShellResult = withIOContext {
@@ -127,16 +130,16 @@ object BaseUtil {
     }
 
     suspend fun releaseBase(context: Context): Boolean = withIOContext {
-        val bin = File(com.xayah.core.util.binDir())
-        val binArchive = File(com.xayah.core.util.binArchivePath())
+        val bin = File(context.binDir())
+        val binArchive = File(context.binArchivePath())
 
         // Remove old bin files
         bin.deleteRecursively()
         binArchive.deleteRecursively()
 
         // Release binaries
-        releaseAssets(context = context, src = com.xayah.core.util.BinArchiveName, child = com.xayah.core.util.BinArchiveName)
-        unzip(src = com.xayah.core.util.binArchivePath(), dst = com.xayah.core.util.binDir())
+        releaseAssets(context = context, src = BinArchiveName, child = BinArchiveName)
+        unzip(src = context.binArchivePath(), dst = context.binDir())
 
         // All binaries need full permissions
         bin.listFiles()?.forEach { file ->
