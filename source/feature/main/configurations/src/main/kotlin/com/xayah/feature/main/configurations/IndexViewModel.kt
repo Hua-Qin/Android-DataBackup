@@ -41,7 +41,6 @@ import com.xayah.core.util.PathUtil
 import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.withLog
 import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -93,8 +92,8 @@ class IndexViewModel @Inject constructor(
                 val src = "${pathUtil.getLocalBackupConfigsDir()}/$ConfigsConfigurationsName"
                 if (AdbService.exists(src)) {
                     val jsonText = AdbService.readJsonText(src)
-                    val config = jsonText?.let {
-                        Gson().fromJson(it, object : TypeToken<Configurations>() {}.type)
+                    val config: Configurations? = jsonText?.let {
+                        Gson().fromJson(it, Configurations::class.java)
                     }
                     val items = mutableListOf<DialogCheckBoxItem<String>>()
                     if (config != null) {

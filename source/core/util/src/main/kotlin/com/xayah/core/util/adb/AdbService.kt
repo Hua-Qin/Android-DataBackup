@@ -1,15 +1,10 @@
 package com.xayah.core.util.adb
 
 import android.content.pm.PackageManager
-import android.os.ParcelFileDescriptor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import rikka.shizuku.Shizuku
-import moe.shizuku.server.IRemoteProcess
-import moe.shizuku.server.IShizukuService
-import java.io.BufferedReader
-import java.io.InputStreamReader
 
 /**
  * ADB 服务封装类，通过 Shizuku 提供的 shell 权限执行命令。
@@ -154,37 +149,18 @@ object AdbService {
     }
 
     /**
-     * 获取 IShizukuService 实例
-     * 通过 Shizuku.getBinder() 获取 Binder 并转换为 AIDL 接口
-     */
-    private fun getService(): IShizukuService {
-        val binder = Shizuku.getBinder()
-            ?: throw IllegalStateException("Shizuku binder not available")
-        return IShizukuService.Stub.asInterface(binder)
-    }
-
-    /**
      * 通过 Shizuku 执行 shell 命令
-     * 使用 IShizukuService.newProcess() 执行命令
-     *
-     * 注意：newProcess 在 API 13 中已标记为 private，计划在 API 14 移除。
-     * 后续需迁移至 UserService 方式执行命令。
+     * 使用 Shizuku.newProcess() 公开 API 执行命令
      *
      * @param command 要执行的命令参数
      * @return 命令执行结果
      */
     fun execute(vararg command: String): AdbResult {
         return try {
-            val remoteProcess: IRemoteProcess = getService().newProcess(command, null, null)
-            val inputStream = ParcelFileDescriptor.AutoCloseInputStream(remoteProcess.inputStream)
-            val errorStream = ParcelFileDescriptor.AutoCloseInputStream(remoteProcess.errorStream)
-            val reader = BufferedReader(InputStreamReader(inputStream))
-            val errorReader = BufferedReader(InputStreamReader(errorStream))
-            val output = reader.readLines()
-            val error = errorReader.readLines()
-            reader.close()
-            errorReader.close()
-            val exitCode = remoteProcess.waitFor()
+            val process = Shizuku.newProcess(command, null, null)
+            val output = process.inputStream.bufferedReader().readLines()
+            val error = process.errorStream.bufferedReader().readLines()
+            val exitCode = process.waitFor()
             AdbResult(
                 isSuccess = exitCode == 0,
                 out = output,
