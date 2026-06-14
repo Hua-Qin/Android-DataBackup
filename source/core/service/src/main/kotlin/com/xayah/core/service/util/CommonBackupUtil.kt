@@ -20,6 +20,7 @@ import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.command.Tar
 import com.xayah.core.util.model.ShellResult
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
 class CommonBackupUtil @Inject constructor(
