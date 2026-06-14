@@ -64,8 +64,7 @@ import com.xayah.core.ui.theme.value
 import com.xayah.core.ui.token.AnimationTokens
 import com.xayah.core.ui.token.SizeTokens
 import com.xayah.core.ui.util.LocalNavController
-import com.xayah.core.ui.viewmodel.IndexUiEffect
-import com.xayah.core.util.command.BaseUtil
+import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.navigateSingle
 import com.xayah.core.util.withMainContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -112,7 +111,7 @@ fun PageProcessing(
             if (uiState.state == OperationState.PROCESSING) {
                 viewModel.launchOnIO {
                     if (dialogState.confirm(title = context.getString(R.string.prompt), text = context.getString(R.string.processing_exit_confirmation))) {
-                        BaseUtil.kill(context, "tar", "root")
+                        AdbService.executeRaw("pkill -f tar")
                         viewModel.emitIntent(ProcessingUiIntent.DestroyService)
                         withMainContext {
                             navController.popBackStack()

@@ -11,6 +11,7 @@ import com.xayah.core.model.DataState
 import com.xayah.core.model.File
 import com.xayah.core.model.OpType
 import com.xayah.core.model.Target
+import com.xayah.core.model.util.of
 import com.xayah.core.model.database.PackageEntity
 import com.xayah.core.ui.route.MainRoutes
 import com.xayah.core.util.decodeURL
