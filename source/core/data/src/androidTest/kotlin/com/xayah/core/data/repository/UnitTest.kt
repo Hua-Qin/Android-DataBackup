@@ -1,7 +1,6 @@
 package com.xayah.core.data.repository;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.topjohnwu.superuser.Shell
 import com.xayah.core.util.command.PackageUtil
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
@@ -15,9 +14,6 @@ class UnitTest {
     @Test
     fun testKeyStoreDetection() {
         val uid = 10481
-        Shell.cmd("su $uid -c keystore_cli_v2 list").exec().apply {
-            println(out)
-        }
         println(runBlocking { PackageUtil.hasKeystore("su", uid) })
     }
 }

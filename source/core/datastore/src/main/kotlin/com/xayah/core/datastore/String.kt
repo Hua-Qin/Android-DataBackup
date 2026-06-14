@@ -16,7 +16,6 @@ val KeyCloudActivatedAccountName = stringPreferencesKey("cloud_activated_account
 val KeyLoadedIconMD5 = stringPreferencesKey("loaded_icon_md5")
 val KeySelectionType = stringPreferencesKey("selection_type")
 val KeyThemeType = stringPreferencesKey("theme_type")
-val KeyCustomSUFile = stringPreferencesKey("custom_su_file")
 val KeyKillAppOption = stringPreferencesKey("kill_app_option")
 val KeyLanguage = stringPreferencesKey("language")
 
@@ -34,8 +33,6 @@ fun Context.readLanguage() = readStoreString(key = KeyLanguage, defValue = Const
  */
 fun Context.readBackupSavePathSaved() = readStoreString(key = KeyBackupSavePath, defValue = "").map { it.isNotEmpty() }
 fun Context.readBackupSavePath() = readStoreString(key = KeyBackupSavePath, defValue = ConstantUtil.DEFAULT_PATH)
-fun Context.readCustomSUFile() = readStoreString(key = KeyCustomSUFile, defValue = "su")
-
 
 // -----------------------------------------Write-----------------------------------------
 suspend fun Context.saveCompressionType(value: CompressionType) = saveStoreString(key = KeyCompressionType, value = value.type.trim())
@@ -45,7 +42,6 @@ suspend fun Context.saveLoadedIconMD5(value: String) = saveStoreString(key = Key
 suspend fun Context.saveSelectionType(value: SelectionType) = saveStoreString(key = KeySelectionType, value = value.name.trim())
 suspend fun Context.saveThemeType(value: ThemeType) = saveStoreString(key = KeyThemeType, value = value.name.trim())
 suspend fun Context.saveBackupSavePath(value: String) = saveStoreString(key = KeyBackupSavePath, value = value.trim())
-suspend fun Context.saveCustomSUFile(value: String) = saveStoreString(key = KeyCustomSUFile, value = value.trim())
 suspend fun Context.saveKillAppOption(value: KillAppOption) = saveStoreString(key = KeyKillAppOption, value = value.name.trim())
 suspend fun Context.saveLanguage(value: String) = saveStoreString(key = KeyLanguage, value = value.trim())
 

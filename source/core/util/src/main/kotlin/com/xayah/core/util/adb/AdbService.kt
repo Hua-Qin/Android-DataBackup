@@ -202,6 +202,14 @@ object AdbService {
     }
 
     /**
+     * 执行原始 shell 命令字符串
+     * 通过 sh -c 执行，支持管道、重定向等 shell 特性
+     */
+    fun executeRaw(command: String): AdbResult {
+        return execute("sh", "-c", command)
+    }
+
+    /**
      * 获取应用的 APK 路径
      */
     fun getPackageSourceDir(packageName: String): List<String> {

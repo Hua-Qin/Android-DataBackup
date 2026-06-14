@@ -19,15 +19,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.xayah.core.datastore.readCustomSUFile
-import com.xayah.core.datastore.saveCustomSUFile
+
 import com.xayah.core.ui.component.AppIcon
 import com.xayah.core.ui.component.BodyMediumText
 import com.xayah.core.ui.component.HeadlineMediumText
-import com.xayah.core.ui.component.LocalSlotScope
 import com.xayah.core.ui.component.Section
 import com.xayah.core.ui.component.SetOnResume
-import com.xayah.core.ui.component.edit
 import com.xayah.core.ui.component.paddingTop
 import com.xayah.core.ui.theme.ThemedColorSchemeKeyTokens
 import com.xayah.core.ui.theme.value
@@ -38,7 +35,6 @@ import com.xayah.feature.setup.PermissionButton
 import com.xayah.feature.setup.R
 import com.xayah.feature.setup.SetupRoutes
 import com.xayah.feature.setup.SetupScaffold
-import kotlinx.coroutines.flow.first
 
 @ExperimentalFoundationApi
 @ExperimentalMaterial3Api
@@ -48,13 +44,11 @@ fun PageOne() {
     val context = LocalContext.current
     val viewModel = hiltViewModel<IndexViewModel>()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val rootState by viewModel.rootState.collectAsStateWithLifecycle()
     val adbState by viewModel.adbState.collectAsStateWithLifecycle()
     val abiState by viewModel.abiState.collectAsStateWithLifecycle()
     val notificationState by viewModel.notificationState.collectAsStateWithLifecycle()
     val allRequiredValidated by viewModel.allRequiredValidated.collectAsStateWithLifecycle()
     val allOptionalValidated by viewModel.allOptionalValidated.collectAsStateWithLifecycle()
-    val dialogState = LocalSlotScope.current!!.dialogSlot
 
     SetOnResume {
         viewModel.emitIntentOnIO(IndexUiIntent.OnResume)
@@ -66,7 +60,6 @@ fun PageOne() {
                 OutlinedButton(
                     onClick = {
                         viewModel.launchOnIO {
-                            viewModel.emitIntent(IndexUiIntent.ValidateRoot)
                             viewModel.emitIntent(IndexUiIntent.ValidateAdb)
                             viewModel.emitIntent(IndexUiIntent.ValidateAbi)
                             viewModel.emitIntent(IndexUiIntent.ValidateNotification(context = context))
@@ -99,28 +92,6 @@ fun PageOne() {
             Spacer(modifier = Modifier.size(SizeTokens.Level24))
 
             Section(title = stringResource(id = R.string.required)) {
-                PermissionButton(
-                    title = stringResource(id = R.string.root_permission),
-                    desc = stringResource(id = R.string.root_permission_desc),
-                    envState = rootState,
-                    onSetting = {
-                        viewModel.launchOnIO {
-                            val (state, su) = dialogState.edit(
-                                title = context.getString(R.string.custom_su_file),
-                                defValue = context.readCustomSUFile().first(),
-                                label = context.getString(R.string.name),
-                                desc = context.getString(R.string.restart_to_take_effect)
-                            )
-                            if (state.isConfirm) {
-                                context.saveCustomSUFile(su)
-                            }
-                        }
-                    }
-                ) {
-                    viewModel.launchOnIO {
-                        viewModel.emitIntent(IndexUiIntent.ValidateRoot)
-                    }
-                }
                 PermissionButton(
                     title = stringResource(id = R.string.adb_permission),
                     desc = stringResource(id = R.string.adb_permission_desc),

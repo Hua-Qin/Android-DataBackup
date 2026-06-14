@@ -6,11 +6,9 @@ import android.os.Build
 import android.util.Log
 import androidx.core.content.FileProvider.getUriForFile
 import com.xayah.core.common.util.BuildConfigUtil
-import com.xayah.core.datastore.readCustomSUFile
 import com.xayah.core.util.SymbolUtil.LF
 import com.xayah.core.util.SymbolUtil.USD
 import com.xayah.core.util.command.BaseUtil
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.io.PrintWriter
@@ -50,7 +48,6 @@ object LogUtil {
         log("SDK:        ${Build.VERSION.SDK_INT}")
         log("Global Namespace:     ${runBlocking { BaseUtil.readLink("1") }}")
         log("Namespace:            ${runBlocking { BaseUtil.readLink("self") }}")
-        log("SU:                   ${runBlocking { BaseUtil.readSuVersion(context.readCustomSUFile().first()) }}")
         log("${USD}PATH:                ${runBlocking { BaseUtil.readVariable("PATH").trim() }}")
         log("${USD}HOME:                ${runBlocking { BaseUtil.readVariable("HOME").trim() }}")
     }

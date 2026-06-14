@@ -4,7 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import androidx.compose.material3.ExperimentalMaterial3Api
-import com.topjohnwu.superuser.Shell
+
 import com.xayah.core.common.util.BuildConfigUtil
 import com.xayah.core.ui.viewmodel.BaseViewModel
 import com.xayah.core.ui.viewmodel.IndexUiEffect
@@ -13,7 +13,6 @@ import com.xayah.core.ui.viewmodel.UiState
 import com.xayah.core.util.NotificationUtil
 import com.xayah.core.util.adb.AdbService
 import com.xayah.core.util.command.BaseUtil
-import com.xayah.core.util.withLog
 import com.xayah.feature.setup.EnvState
 import com.xayah.feature.setup.R
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -56,22 +55,7 @@ class IndexViewModel @Inject constructor(
             }
 
             is IndexUiIntent.ValidateRoot -> {
-                emitIntent(IndexUiIntent.ValidateAbi)
-                mutex.withLock {
-                    if (rootState.value == EnvState.Idle || rootState.value == EnvState.Failed) {
-                        _rootState.value = EnvState.Processing
-                        runCatching {
-                            BaseUtil.initializeEnvironment(context = context)
-                        }
-                        runCatching {
-                            // Kill daemon
-                            BaseUtil.kill(context, "${context.packageName}:root:daemon")
-                        }.withLog()
-                        _rootState.value = if (runCatching { Shell.getShell().isRoot }.getOrElse { false }) {
-                            EnvState.Succeed
-                        } else EnvState.Failed
-                    }
-                }
+                // ROOT mode is no longer supported, only ADB mode
             }
 
             is IndexUiIntent.ValidateAdb -> {
